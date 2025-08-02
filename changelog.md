@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.10
+* **Enhancement:** Remembers the optional additional file to scan by saving it in the database.
+=======
 ## 1.0.9
 * **Enhancement:** The scanner's description for `add_fee()` calls is now more abstract and human-readable. Instead of showing variable placeholders like `{surcharge}`, it now describes the conditional logic (e.g., from a `match` statement) that determines the fee amount, providing a clearer explanation of the rule.
 
