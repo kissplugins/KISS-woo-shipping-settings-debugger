@@ -1,212 +1,696 @@
 <?php
 /**
- * KISS Woo Shipping Settings Debugger — main plugin file.
- *
- * Provides an admin-side utility to export UI-based shipping settings and scan the theme for
- * custom, code-based shipping restriction rules.
- *
- * @package   KISSShippingDebugger
- * @author    Your Name
- * @copyright Copyright (c) 2025 KISS Plugins
- * @license   GPL-2.0+
- * @link      https://example.com/
- * @since     0.1.0
- */
-
-/**
  * Plugin Name: KISS Woo Shipping Settings Debugger
- * Description: Adds a link to the plugins page and a Tool to export settings and scan the theme for custom shipping rules.
- * Version:   0.5.0
- * Author:    Your Name
- * License:   GPL-2.0+
+ * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
+ * Version:     2.3.2
+ * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: kiss-woo-shipping-debugger
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
-
 define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 
-add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
+require_once __DIR__ . '/preview-trait.php';
+require_once __DIR__ . '/scanner-trait.php';
+require_once __DIR__ . '/self-test.php';
 
+
+add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
+/**
+ * Initialize the debugger after plugins load.
+ *
+ * Displays an admin notice if WooCommerce is inactive.
+ */
 function kiss_wse_initialize_debugger(): void {
     if ( ! class_exists( 'WooCommerce' ) ) {
-        add_action( 'admin_notices', function() {
-            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html__( 'The KISS Woo Shipping Settings Debugger plugin requires WooCommerce to be active.', 'kiss-woo-shipping-debugger' ));
-        });
+        add_action( 'admin_notices', fn() => printf(
+            '<div class="notice notice-error"><p>%s</p></div>',
+            esc_html__( 'KISS Woo Shipping Settings Debugger requires WooCommerce to be active.', 'kiss-woo-shipping-debugger' )
+        ));
         return;
     }
     new KISS_WSE_Debugger();
 }
 
-if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
+/**
+ * Contains helper methods for testing without affecting production code.
+ * This trait is defined here to avoid redeclaration errors.
+ */
+trait KISS_WSE_Testable {
+    public function collect_zone_rows_from_data( array $mock_zones, int $cap = 100 ): array {
+        $rows = [];
+        $warnings = [];
+        $total_rows = 0;
 
-    final class KISS_WSE_Debugger {
-
-        private $page_slug = 'kiss-wse-export';
-
-        public function __construct() {
-            add_action( 'admin_menu', [ $this, 'register_menu' ] );
-            add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
-            add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
-        }
-
-        public function add_action_links( array $links ): array {
-            $settings_link = sprintf(
-                '<a href="%s">%s</a>',
-                esc_url( admin_url( 'tools.php?page=' . $this->page_slug ) ),
-                __( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' )
-            );
-            array_unshift( $links, $settings_link );
-            return $links;
-        }
-
-        public function register_menu(): void {
-            add_management_page(
-                __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-                __( 'KISS Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-                'manage_woocommerce', $this->page_slug, [ $this, 'render_page' ]
-            );
-        }
-
-        /**
-         * NEW: Scans the theme for the custom shipping restrictions file and renders the results.
-         * @since 0.5.0
-         */
-        private function scan_and_render_custom_rules(): void {
-            echo '<h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
-
-            $file_path = get_stylesheet_directory() . '/inc/shipping-restrictions.php';
-
-            if ( ! file_exists( $file_path ) ) {
-                printf( '<p>%s</p>', esc_html__( 'Custom shipping file not found at:', 'kiss-woo-shipping-debugger' ) );
-                echo '<code>' . esc_html( $file_path ) . '</code>';
-                return;
+        foreach ($mock_zones as $zone) {
+            $zone_name = $zone->get_zone_name();
+            // Since this is a mock test, we don't need the full HTML rendering of locations
+            // $locations_html = $this->format_zone_locations($zone, 6);
+            $methods = $zone->get_shipping_methods();
+            
+            $enabled = 0; $disabled = 0;
+            foreach ($methods as $m) {
+                if ('yes' === $m->enabled) $enabled++; else $disabled++;
             }
 
-            printf( '<p>%s</p>', esc_html__( 'The following programmatic rules were found in your theme. Note: This is a best-effort analysis and may not capture all custom logic.', 'kiss-woo-shipping-debugger' ) );
-            echo '<code>' . esc_html( $file_path ) . '</code>';
-
-            $contents = file_get_contents( $file_path );
-            $tokens = token_get_all( $contents );
-
-            $rules = [];
-            $current_context = 'none';
-
-            foreach ( $tokens as $i => $token ) {
-                if ( ! is_array( $token ) ) continue;
-
-                // Detect state-based rules
-                if ( $token[0] === T_IF ) {
-                    if ( isset( $tokens[$i+2][1] ) && $tokens[$i+2][1] === '$state' && isset( $tokens[$i+4][1] ) ) {
-                        $state_code = str_replace("'", "", $tokens[$i+4][1]);
-                        $rules[] = ['type' => 'context', 'value' => "For State: <strong>" . esc_html( $state_code ) . "</strong>"];
+            $zone_issues = [];
+            if ($enabled === 0) {
+                $zone_issues[] = __( 'Zone has no enabled shipping methods.', 'kiss-woo-shipping-debugger' );
+            }
+            foreach ($methods as $m) {
+                if ($m->id === 'free_shipping' && 'yes' === $m->enabled) {
+                    $requires = (string)$m->get_option('requires', '');
+                    if ($requires === '' || $requires === 'no') {
+                        $zone_issues[] = __( 'Free Shipping has no requirement (no minimum and no coupon).', 'kiss-woo-shipping-debugger' );
+                        break;
                     }
                 }
-                
-                // Detect `is_binoidcbd()` or similar contexts
-                if ( $token[0] === T_STRING && in_array( $token[1], ['is_binoidcbd', 'is_bloomz'] ) ) {
-                     $rules[] = ['type' => 'context', 'value' => "When `{$token[1]}()` is true:"];
-                }
-                
-                // Detect category restrictions via `has_term`
-                if ($token[0] === T_STRING && $token[1] === 'has_term') {
-                    if (isset($tokens[$i+2][1]) && $tokens[$i+2][0] === T_ARRAY) {
-                        $array_content = '';
-                        for ($j = $i + 3; $j < count($tokens); $j++) {
-                            if ($tokens[$j] === ')') break;
-                            $array_content .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
-                        }
-                        $cats = str_replace(["'", ' '], '', trim($array_content, '()'));
-                        $rules[] = ['type' => 'rule', 'value' => "Checks for product categories: <code>" . esc_html($cats) . "</code>"];
-                    }
-                }
+            }
 
-                // Detect error messages being added
-                if ($token[0] === T_STRING && $token[1] === '__') {
-                     if (isset($tokens[$i+2][1])) {
-                        $message = trim($tokens[$i+2][1], '"');
-                        $rules[] = ['type' => 'message', 'value' => esc_html($message)];
-                     }
-                }
-
-                // Detect array definitions for states/postcodes
-                if ($token[0] === T_VARIABLE && in_array($token[1], ['$restricted_states', '$restricted_postcodes', '$restricted_postcodes_kratom'])) {
-                    $array_content = '';
-                    for ($j = $i + 2; $j < count($tokens); $j++) {
-                        if (is_string($tokens[$j]) && $tokens[$j] === ';') break;
-                        $array_content .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
-                    }
-                    preg_match_all("/'([^']*)'/", $array_content, $matches);
-                    $count = count($matches[1]) / 2;
-                    $rules[] = ['type' => 'array', 'value' => "Found restriction array <code>{$token[1]}</code> with <strong>" . (int) $count . "</strong> entries."];
-                }
+            if (!empty($zone_issues)) {
+                $warnings[] = sprintf('<strong>%s</strong>: %s', esc_html($zone_name), esc_html(implode('; ', $zone_issues)));
             }
             
-            // Render the discovered rules
-            if (!empty($rules)) {
-                echo '<ul class="ul-disc" style="margin-left: 20px;">';
-                foreach ($rules as $rule) {
-                    $style = 'padding-left: 10px;';
-                    if ($rule['type'] === 'context') $style = 'font-weight: bold; margin-top: 1em;';
-                    if ($rule['type'] === 'message') $style .= 'padding-left: 20px; font-style: italic;';
-                    
-                    echo '<li style="' . esc_attr($style) . '">' . wp_kses_post($rule['value']) . '</li>';
+            $total_rows++;
+            if ($total_rows >= $cap) break;
+        }
+
+        $warnings_html = '';
+        if (!empty($warnings)) {
+            $warnings_html = '⚠️ ' . implode('<br>⚠️ ', $warnings);
+        }
+
+        return [ [], $total_rows, $warnings_html ];
+    }
+
+    /**
+     * A dedicated scanner for the self-test suite.
+     * This scans only one file and returns the output as a string, ensuring the test is isolated.
+     */
+    public function scan_single_file_for_test( string $file_path ): string {
+        if ( ! file_exists( $file_path ) ) {
+            return 'Test Error: File not found at ' . esc_html($file_path);
+        }
+        if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+            return 'Test Error: PHP-Parser not available.';
+        }
+
+        ob_start();
+
+        require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
+        $code   = file_get_contents( $file_path );
+        $parser = $this->create_parser();
+
+        $ast       = $parser->parse( $code );
+        $trav      = new \PhpParser\NodeTraverser();
+        $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
+        $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
+        $trav->addVisitor( $visitor );
+        $trav->traverse( $ast );
+
+        $sections = [
+            'unsetRates'  => $visitor->getUnsetRateNodes(),
+            'addFees'     => $visitor->getAddFeeNodes(),
+            'newRates'    => $visitor->getNewRateNodes(),
+        ];
+
+        $titles = [
+            'unsetRates'  => __('unset($rates[])', 'kiss-woo-shipping-debugger'),
+            'addFees'     => __('add_fee() Calls', 'kiss-woo-shipping-debugger'),
+            'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
+        ];
+
+        foreach ( $titles as $key => $title ) {
+            if ( ! empty( $sections[ $key ] ) ) {
+                printf( '<h4>%s</h4><ul>', esc_html( $title ) );
+                foreach ( $sections[ $key ] as $node ) {
+                    $desc = $this->describe_node( $key, $node );
+                    // Use wp_kses_post to allow <code> tags in test output
+                    printf( '<li>%s</li>', wp_kses_post( $desc ) );
                 }
                 echo '</ul>';
-            } else {
-                echo '<p>' . esc_html__('Could not automatically detect any rules from the file.', 'kiss-woo-shipping-debugger' ) . '</p>';
+            }
+        }
+        
+        return ob_get_clean();
+    }
+}
+
+/**
+ * Main controller for the Shipping Settings Debugger.
+ */
+class KISS_WSE_Debugger {
+    private string $page_slug = 'kiss-wse-export';
+
+    use KISS_WSE_Preview, KISS_WSE_Testable;
+
+    use KISS_WSE_Scanner {
+        scan_and_render_custom_rules as public;
+        create_parser as public;
+        short_explanation_label as public;
+        describe_node as public;
+        extract_string as public;
+        extract_string_or_placeholder as public;
+        expr_placeholder as public;
+        describe_callback as public;
+        extract_unset_rate_key as public;
+        string_or_resolved_variable as public;
+        resolve_variable_value as public;
+        condition_chain_text as public;
+        describe_variable_assignment as public;
+        cond_to_text as public;
+        is_false_const as public;
+        is_var_named as public;
+        is_number_like as public;
+        simple_expr_text as public;
+        condition_mentions_free_shipping as public;
+    }
+
+    /**
+     * Constructor. Hooks into WordPress admin and ensures PHP-Parser is loaded.
+     */
+    public function __construct() {
+        // Load PHP-Parser
+        if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+            $this->maybe_require_parser_loader();
+        }
+
+        add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
+        add_action( 'admin_menu', [ $this, 'register_menu' ] );
+        add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
+        add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
+    }
+
+    /**
+     * Attempt to locate and require a php-parser loader from any plugin folder.
+     */
+    private function maybe_require_parser_loader(): void {
+        foreach ( glob( WP_PLUGIN_DIR . '/*', GLOB_ONLYDIR ) as $dir ) {
+            $loader = $dir . '/php-parser-loader.php';
+            if ( file_exists( $loader ) ) {
+                require_once $loader;
+                if ( class_exists( \PhpParser\ParserFactory::class ) ) {
+                    return;
+                }
+            }
+        }
+        error_log( 'KISS WSE Debugger: php-parser-loader.php not found.' );
+    }
+
+    /**
+     * Add a convenient settings link on the plugins page.
+     */
+    public function add_action_links( array $links ): array {
+        $url  = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
+        $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
+        array_unshift( $links, "<a href=\"$url\">$text</a>" );
+        return $links;
+    }
+
+    /**
+     * Register the Tools submenu page for the debugger UI.
+     */
+    public function register_menu(): void {
+        // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
+        add_submenu_page(
+            'woocommerce',
+            __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            'manage_woocommerce',
+            $this->page_slug,
+            [ $this, 'render_page' ]
+        );
+    }
+
+    /**
+     * Output the main admin page with scan and export options.
+     */
+    public function render_page(): void {
+        if ( isset( $_GET['wse_additional_file'] ) ) {
+            $additional = sanitize_text_field( wp_unslash( $_GET['wse_additional_file'] ) );
+            update_option( 'kiss_wse_additional_file', $additional );
+        } else {
+            $additional = sanitize_text_field( (string) get_option( 'kiss_wse_additional_file', '' ) );
+        }
+
+        echo '<div class="wrap">';
+        echo '<h1>' . esc_html__( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
+
+        // --- PHP-Parser Status & Self-Test (auto) ---
+        $parser_loaded = class_exists( \PhpParser\ParserFactory::class );
+        $parser_ok     = false;
+        $parser_msg    = '';
+
+        if ( $parser_loaded ) {
+            try {
+                $parser = $this->create_parser();
+                // Tiny parse test
+                $test_code = "<?php\nfunction _kiss_wse_test(){return 42;} _kiss_wse_test();";
+                $ast = $parser->parse( $test_code );
+                $parser_ok  = is_array( $ast ) && ! empty( $ast );
+                $parser_msg = $parser_ok
+                    ? __( 'PHP-Parser is loaded and parsed a test snippet successfully.', 'kiss-woo-shipping-debugger' )
+                    : __( 'PHP-Parser is present but could not parse the test snippet.', 'kiss-woo-shipping-debugger' );
+            } catch ( \Throwable $e ) {
+                $parser_ok  = false;
+                $parser_msg = sprintf(
+                    /* translators: %s is an error message */
+                    __( 'PHP-Parser error: %s', 'kiss-woo-shipping-debugger' ),
+                    $e->getMessage()
+                );
+                error_log( '[KISS WSE Parser Test] ' . $e->getMessage() );
+            }
+        } else {
+            $parser_msg = __( 'PHP-Parser is not loaded. Some scanning features may be unavailable.', 'kiss-woo-shipping-debugger' );
+        }
+
+        if ( $parser_loaded && $parser_ok ) {
+            printf(
+                '<div class="notice notice-success"><p>%s</p></div>',
+                esc_html( $parser_msg )
+            );
+        } else {
+            printf(
+                '<div class="notice notice-warning"><p>%s</p></div>',
+                esc_html( $parser_msg )
+            );
+        }
+
+        // --- Custom Rules Scanner UI ---
+        echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
+        echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
+        printf(
+            '<form method="get" style="padding:1em;border:1px solid #c3c4c7;background:#fff;">
+                <input type="hidden" name="page" value="%1$s">
+                <p>
+                  <label><strong>%2$s</strong></label><br>
+                  <span style="font-family:monospace;">%3$s</span>
+                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="inc/woo-functions.php" value="%4$s">
+                  <br><em>%6$s</em>
+                </p>
+                <p><button type="submit" class="button">%5$s</button></p>
+             </form>',
+            esc_attr( $this->page_slug ),
+            esc_html__( 'Scan Additional Theme File (Optional)', 'kiss-woo-shipping-debugger' ),
+            esc_html( get_stylesheet_directory() ),
+            esc_attr( $additional ),
+            esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
+            esc_html__( 'Path is relative to the active theme’s root directory (e.g., "woo-functions.php" or "inc/extra.php").', 'kiss-woo-shipping-debugger' )
+        );
+
+        try {
+            $this->scan_and_render_custom_rules( $additional );
+        } catch ( \Throwable $e ) {
+            echo '<div class="notice notice-error"><pre>' . esc_html( $e->getMessage() ) . '</pre></div>';
+            error_log( '[KISS Scanner] ' . $e->getMessage() );
+        }
+
+        // --- UI Settings Export UI + Zones & Methods Preview ---
+        echo '<hr/><h2>' . esc_html__( 'UI-Based Settings Export', 'kiss-woo-shipping-debugger' ) . '</h2>';
+        echo '<p>' . esc_html__( 'Preview and download WooCommerce shipping settings configured in the admin.', 'kiss-woo-shipping-debugger' ) . '</p>';
+
+        // Export button
+        printf(
+            '<form method="post" action="%1$s" style="margin-bottom:1em;">%2$s
+               <input type="hidden" name="action" value="%3$s">
+               <p><button type="submit" class="button button-primary">%4$s</button></p>
+             </form>',
+            esc_url( admin_url( 'admin-post.php' ) ),
+            wp_nonce_field( $this->page_slug, 'wse_nonce', true, false ),
+            esc_attr( $this->page_slug ),
+            esc_html__( 'Download CSV of UI Settings', 'kiss-woo-shipping-debugger' )
+        );
+
+        // Zones preview table + filters + warnings
+        $this->render_preview_table();
+
+        echo '</div>';
+    }
+
+    /**
+     * Stream a CSV export of configured WooCommerce shipping settings.
+     */
+    public function handle_export(): void {
+        // Capability check
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_die( esc_html__( 'Insufficient permissions.', 'kiss-woo-shipping-debugger' ), 403 );
+        }
+
+        // Nonce verification
+        check_admin_referer( $this->page_slug, 'wse_nonce' );
+
+        // Prepare CSV streaming
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=utf-8' );
+
+        $host     = parse_url( home_url(), PHP_URL_HOST );
+        $filename = sanitize_file_name( sprintf( '%s-shipping-%s.csv', (string) $host, wp_date( 'Y-m-d-His' ) ) );
+        header( 'Content-Disposition: attachment; filename=' . $filename );
+
+        /**
+         * Stream CSV.
+         * DRY: allow existing logic to output rows if present.
+         */
+        if ( method_exists( $this, 'output_csv' ) ) {
+            $this->output_csv();
+        } elseif ( function_exists( 'kiss_wse_output_csv' ) ) {
+            kiss_wse_output_csv();
+        } else {
+            $out = fopen( 'php://output', 'w' );
+            if ( $out ) {
+                fputcsv( $out, [ 'notice', 'No export rows available in this build.' ] );
+                fclose( $out );
             }
         }
 
-        public function render_page(): void {
-            $submit_button_html = sprintf( '<p><button type="submit" class="button button-primary button-large">%s</button></p>', esc_html__( 'Download CSV of UI Settings', 'kiss-woo-shipping-debugger' ) );
-            ?>
-            <div class="wrap">
-                <h1><?php esc_html_e( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ); ?></h1>
-                
-                <hr/>
-                <?php $this->scan_and_render_custom_rules(); ?>
-                <hr/>
+        exit;
+    }
 
-                <h2><?php esc_html_e( 'UI-Based Settings Export', 'kiss-woo-shipping-debugger' ); ?></h2>
-                <p><?php esc_html_e( 'This section previews and exports the settings configured in the WooCommerce UI (shipping zones, methods, etc.).', 'kiss-woo-shipping-debugger' ); ?></p>
-                
-                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                    <?php wp_nonce_field( $this->page_slug, 'wse_nonce' ); ?>
-                    <input type="hidden" name="action" value="<?php echo esc_attr( $this->page_slug ); ?>" />
-                    <?php echo $submit_button_html; ?>
-                    
-                    <!-- Code for preview table from v0.4.0... -->
-                    <?php
-                        $preview_limit = 10;
-                        $zone_headers = [ 'Zone Name', 'Locations', 'Method Title', 'Method Type', 'Cost', 'Class Cost' ];
-                        $all_zones = WC_Shipping_Zones::get_zones();
-                        $preview_zones_data = []; $total_zone_rows = 0;
-                        foreach ($all_zones as $zone_array) { if (count($preview_zones_data) >= $preview_limit) break; $zone = new WC_Shipping_Zone($zone_array['zone_id']); $locations = []; foreach ($zone->get_zone_locations() as $location) { $locations[] = $location->code . ':' . $location->type; } $location_str = empty($locations) ? 'Rest of the World' : implode(' | ', $locations); $methods = $zone->get_shipping_methods(true); if (empty($methods)) { $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, '<em>No methods configured</em>', '', '', '' ]; $total_zone_rows++; } else { foreach ($methods as $method) { if (count($preview_zones_data) >= $preview_limit) break 2; $settings = $method->instance_settings; $cost = $settings['cost'] ?? ''; if (!empty($settings['class_costs']) && is_array($settings['class_costs'])) { foreach ($settings['class_costs'] as $slug => $class_cost) { if (count($preview_zones_data) >= $preview_limit) break 3; $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, $method->get_title(), $method->id, $cost, $class_cost ]; $total_zone_rows++; } } else { $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, $method->get_title(), $method->id, $cost, '' ]; $total_zone_rows++; } } } }
-                    ?>
-                    <h3><?php esc_html_e( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ); ?></h3>
-                    <table class="wp-list-table widefat striped"><thead><tr><?php foreach ( $zone_headers as $header ) echo '<th scope="col">' . esc_html( $header ) . '</th>'; ?></tr></thead><tbody><?php foreach ( $preview_zones_data as $row ) { echo '<tr>'; foreach ( $row as $cell ) echo '<td>' . esc_html( $cell ) . '</td>'; echo '</tr>'; } ?></tbody></table>
-                    <?php if ( $total_zone_rows > count($preview_zones_data) ) printf('<p><em>' . esc_html__('And %d more rows...', 'kiss-woo-shipping-debugger') . '</em></p>', esc_html( $total_zone_rows - count($preview_zones_data) ) ); ?>
-                    
-                    <hr/>
-                    <?php echo $submit_button_html; ?>
-                </form>
-            </div>
-            <?php
+    public function render_preview_table(): void {
+        if ( ! class_exists( 'WC_Shipping_Zones' ) ) {
+            echo '<p><em>' . esc_html__( 'WooCommerce shipping is not available.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+            return;
         }
-        
-        // Unchanged handle_export method...
-        public function handle_export(): void {
-            if ( ! current_user_can( 'manage_woocommerce' ) ) { wp_die( __( 'Sorry, you are not allowed to export this data.', 'kiss-woo-shipping-debugger' ) ); }
-            check_admin_referer( $this->page_slug, 'wse_nonce' );
-            if ( function_exists( 'set_time_limit' ) ) { set_time_limit( 0 ); }
-            $filename = sanitize_title( get_bloginfo( 'name' ) ) . '-shipping-' . wp_date( 'Y-m-d-His' ) . '.csv';
-            if ( ob_get_level() > 0 ) { ob_end_clean(); }
-            header( 'Content-Type: text/csv; charset=utf-8' );
-            header( 'Content-Disposition: attachment; filename=' . $filename );
-            try { $output = fopen( 'php://output', 'w' ); fputcsv( $output, [ get_bloginfo( 'name' ) . ' - Shipping Settings Export' ] ); fputcsv( $output, [ 'Generated:', wp_date( 'Y-m-d H:i:s' ) ] ); fputcsv( $output, [] ); fputcsv( $output, [ 'Zone ID', 'Zone Name', 'Zone Locations (code:type)', 'Method Instance ID', 'Method Title', 'Method Type', 'Cost', 'Tax Status', 'Shipping Class ID', 'Shipping Class Cost', ] ); foreach ( WC_Shipping_Zones::get_zones() as $zone_array ) { $zone = new WC_Shipping_Zone($zone_array['zone_id']); $locations = []; foreach ( $zone->get_zone_locations() as $location ) { $locations[] = $location->code . ':' . $location->type; } $location_str = empty($locations) ? 'Rest of the World' : implode(' | ', $locations); foreach ( $zone->get_shipping_methods( true ) as $instance_id => $method ) { $settings = $method->instance_settings; $cost = $settings['cost'] ?? ''; $tax_status = $settings['tax_status'] ?? ''; if ( ! empty( $settings['class_costs'] ) && is_array( $settings['class_costs'] ) ) { foreach ( $settings['class_costs'] as $class_slug => $class_cost ) { $class_term = get_term_by( 'slug', $class_slug, 'product_shipping_class' ); fputcsv( $output, [ $zone->get_id(), $zone->get_zone_name(), $location_str, $instance_id, $method->get_title(), $method->id, $cost, $tax_status, $class_term ? $class_term->term_id : 'slug:' . $class_slug, $class_cost, ]); } } else { fputcsv( $output, [ $zone->get_id(), $zone->get_zone_name(), $location_str, $instance_id, $method->get_title(), $method->id, $cost, $tax_status, '', '', ]); } } unset($zone, $locations, $location_str); } fputcsv( $output, [] ); fputcsv( $output, [ 'All Defined Shipping Classes' ] ); fputcsv( $output, [ 'Class ID', 'Class Name', 'Slug', 'Description' ] ); $shipping_classes = WC()->shipping()->get_shipping_classes(); if ( ! empty($shipping_classes) ) { foreach ( $shipping_classes as $class ) { fputcsv( $output, [ $class->term_id, $class->name, $class->slug, $class->description ] ); } } else { fputcsv( $output, [ 'No shipping classes found.' ] ); } } catch ( Exception $e ) { error_log('Error during CSV generation: ' . $e->getMessage()); } finally { if ( isset($output) && is_resource($output) ) { fclose( $output ); } } exit;
+
+        // Quick filters (GET, non-persistent)
+        $issues_only          = isset( $_GET['wse_issues_only'] ) ? (bool) $_GET['wse_issues_only'] : false;
+        $methods_enabled_only = isset( $_GET['wse_methods_enabled_only'] ) ? (bool) $_GET['wse_methods_enabled_only'] : false;
+
+        // Filter UI
+        $filters_url = add_query_arg( [
+            'page' => $this->page_slug,
+        ], admin_url( 'admin.php' ) );
+
+        echo '<h3>' . esc_html__( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ) . '</h3>';
+        echo '<form method="get" style="margin:0 0 12px 0;">';
+        echo '<input type="hidden" name="page" value="' . esc_attr( $this->page_slug ) . '"/>';
+        echo '<label style="margin-right:12px;"><input type="checkbox" name="wse_issues_only" value="1" ' . checked( $issues_only, true, false ) . '/> ' . esc_html__( 'Only show zones with issues', 'kiss-woo-shipping-debugger' ) . '</label>';
+        echo '<label style="margin-right:12px;"><input type="checkbox" name="wse_methods_enabled_only" value="1" ' . checked( $methods_enabled_only, true, false ) . '/> ' . esc_html__( 'Show only enabled methods', 'kiss-woo-shipping-debugger' ) . '</label>';
+        echo ' <button class="button" type="submit">' . esc_html__( 'Apply Filters', 'kiss-woo-shipping-debugger' ) . '</button>';
+        echo ' <a class="button button-link-delete" href="' . esc_url( $filters_url ) . '">' . esc_html__( 'Reset', 'kiss-woo-shipping-debugger' ) . '</a>';
+        echo '</form>';
+
+        // Collect rows (cap 100)
+        $cap = 100;
+        $rows = [];
+        $warnings_html = '';
+
+        list( $rows, $total_rows, $warnings_html ) = $this->collect_zone_rows( $issues_only, $methods_enabled_only, $cap );
+
+        // Warnings (aggregate)
+        if ( ! empty( $warnings_html ) ) {
+            echo '<div class="notice notice-warning"><p style="margin:8px 0 0 0;">' . wp_kses_post( $warnings_html ) . '</p></div>';
         }
+
+        // Headers
+        $zone_headers = [
+            __( 'Zone', 'kiss-woo-shipping-debugger' ),
+            __( 'Locations', 'kiss-woo-shipping-debugger' ),
+            __( 'Methods', 'kiss-woo-shipping-debugger' ),
+            __( 'Links', 'kiss-woo-shipping-debugger' ),
+        ];
+
+        // Table (exact rendering style requested)
+        echo '<table class="wp-list-table widefat striped"><thead><tr>';
+        foreach ( $zone_headers as $header ) {
+            echo '<th scope="col">' . esc_html( $header ) . '</th>';
+        }
+        echo '</tr></thead><tbody>';
+        foreach ( $rows as $row ) {
+            echo '<tr>';
+            foreach ( $row as $cell ) {
+                echo '<td>' . wp_kses_post( $cell ) . '</td>';
+            }
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        if ( $total_rows > count( $rows ) ) {
+            printf(
+                '<p><em>%s</em></p>',
+                sprintf(
+                    /* translators: %d is the number of additional rows */
+                    esc_html__( 'And %d more rows...', 'kiss-woo-shipping-debugger' ),
+                    (int) ( $total_rows - count( $rows ) )
+                )
+            );
+        }
+    }
+
+    public function collect_zone_rows( bool $issues_only, bool $methods_enabled_only, int $cap ): array {
+        $rows = [];
+        $warnings = [];
+
+        // Build a list of zone IDs (add 0 for Rest of the world)
+        $zone_rows = \WC_Shipping_Zones::get_zones(); // array of arrays with 'zone_id'
+        $zone_ids  = [];
+        foreach ( $zone_rows as $zr ) {
+            if ( isset( $zr['zone_id'] ) ) {
+                $zone_ids[] = (int) $zr['zone_id'];
+            }
+        }
+        $zone_ids[] = 0; // Rest of the world
+
+        $total_rows = 0;
+
+        foreach ( $zone_ids as $zone_id ) {
+            $zone = new \WC_Shipping_Zone( (int) $zone_id );
+
+            $zone_name      = (string) $zone->get_zone_name();
+            $locations_html = $this->format_zone_locations( $zone, 6 ); // cap display to 6 items
+            $methods        = $zone->get_shipping_methods();
+
+            // Build methods cell + counts + badges
+            $enabled = 0; $disabled = 0;
+            $method_lines = [];
+            $method_links = [];
+
+            foreach ( $methods as $m ) {
+                $is_enabled = ( 'yes' === $m->enabled );
+                if ( $is_enabled ) $enabled++; else $disabled++;
+
+                if ( $methods_enabled_only && ! $is_enabled ) {
+                    continue;
+                }
+
+                $badge = $is_enabled
+                    ? '<span style="display:inline-block;padding:2px 6px;border-radius:12px;background:#e7f7ed;color:#0a732e;font-size:11px;margin-right:6px;">' . esc_html__( 'Enabled', 'kiss-woo-shipping-debugger' ) . '</span>'
+                    : '<span style="display:inline-block;padding:2px 6px;border-radius:12px;background:#f7e7e7;color:#8a0b0b;font-size:11px;margin-right:6px;">' . esc_html__( 'Disabled', 'kiss-woo-shipping-debugger' ) . '</span>';
+
+                $summary = $this->summarize_method( $m );
+                $method_lines[] = $badge . $summary;
+
+                $method_links[] = sprintf(
+                    '<a href="%s">%s</a>',
+                    esc_url( $this->method_edit_link( (int) $zone_id, (int) $m->instance_id ) ),
+                    esc_html__( 'Edit method', 'kiss-woo-shipping-debugger' )
+                );
+            }
+
+            // Per-zone warnings
+            $zone_issues = [];
+            if ( $enabled === 0 ) {
+            $zone_issues[] = __( 'Zone has no enabled shipping methods. You might want to add or enable at least one shipping method for this zone in WooCommerce settings.', 'kiss-woo-shipping-debugger' );
+            }
+            foreach ( $methods as $m ) {
+                if ( $m->id === 'free_shipping' && 'yes' === $m->enabled ) {
+                    $requires = (string) $m->get_option( 'requires', '' );
+                    if ( $requires === '' || $requires === 'no' ) {
+                        $zone_issues[] = __( 'Free Shipping has no requirement (no minimum and no coupon).', 'kiss-woo-shipping-debugger' );
+                        break;
+                    }
+                }
+            }
+
+            // Apply zone-level "issues only" filter
+            if ( $issues_only && empty( $zone_issues ) ) {
+                continue;
+            }
+
+            // Aggregate warnings list
+            if ( ! empty( $zone_issues ) ) {
+                $warnings[] = sprintf(
+                    '<strong>%s</strong>: %s',
+                    esc_html( $zone_name ),
+                    esc_html( implode( '; ', $zone_issues ) )
+                );
+            }
+
+            // Zone cell with counts
+            $counts_label = sprintf(
+                /* translators: 1: enabled count, 2: disabled count */
+                __( '%1$d enabled / %2$d disabled', 'kiss-woo-shipping-debugger' ),
+                (int) $enabled,
+                (int) $disabled
+            );
+
+            $zone_cell = sprintf(
+                '<strong>%s</strong><br><span style="opacity:.75;">%s</span>',
+                esc_html( $zone_name ),
+                esc_html( $counts_label )
+            );
+
+            // Methods cell
+            $methods_cell = empty( $method_lines )
+                ? '<em>' . esc_html__( '—', 'kiss-woo-shipping-debugger' ) . '</em>'
+                : implode( '<br>', array_map( 'wp_kses_post', $method_lines ) );
+
+            // Links cell
+            $links_parts = [];
+            $links_parts[] = sprintf(
+                '<a href="%s">%s</a>',
+                esc_url( $this->zone_edit_link( (int) $zone_id ) ),
+                esc_html__( 'Edit zone', 'kiss-woo-shipping-debugger' )
+            );
+            if ( ! empty( $method_links ) ) {
+                $links_parts[] = implode( ' | ', $method_links );
+            }
+            $links_cell = implode( '<br>', $links_parts );
+
+            $rows[] = [
+                $zone_cell,
+                $locations_html,
+                $methods_cell,
+                $links_cell,
+            ];
+
+            $total_rows++;
+
+            // Cap the preview
+            if ( $total_rows >= $cap ) {
+                break;
+            }
+        }
+
+        $warnings_html = '';
+        if ( ! empty( $warnings ) ) {
+            $warnings_html = '⚠️ ' . implode( '<br>⚠️ ', $warnings );
+        }
+
+        return [ $rows, $total_rows, $warnings_html ];
+    }
+
+    public function format_zone_locations( \WC_Shipping_Zone $zone, int $display_cap = 6 ): string {
+        $locations = $zone->get_zone_locations();
+
+        if ( empty( $locations ) ) {
+            // For the "0" zone (rest of world)
+            return '<em>' . esc_html__( 'Rest of the world', 'kiss-woo-shipping-debugger' ) . '</em>';
+        }
+
+        $parts = [];
+        foreach ( $locations as $loc ) {
+            $type = isset( $loc->type ) ? $loc->type : ( $loc['type'] ?? '' );
+            $code = isset( $loc->code ) ? $loc->code : ( $loc['code'] ?? '' );
+
+            switch ( $type ) {
+                case 'country':
+                    $parts[] = esc_html( $code );
+                    break;
+                case 'state':
+                    $parts[] = esc_html( $code ); // e.g., US:CA
+                    break;
+                case 'continent':
+                    $parts[] = esc_html( $code ); // e.g., EU
+                    break;
+                case 'postcode':
+                    $parts[] = esc_html( $code );
+                    break;
+                default:
+                    $parts[] = esc_html( (string) $code );
+                    break;
+            }
+
+            if ( count( $parts ) >= $display_cap ) {
+                break;
+            }
+        }
+
+        $more = max( 0, count( $locations ) - $display_cap );
+        $label = implode( ', ', $parts );
+        if ( $more > 0 ) {
+            $label .= ' <span style="opacity:.75;">+' . (int) $more . ' ' . esc_html__( 'more', 'kiss-woo-shipping-debugger' ) . '</span>';
+        }
+        return $label;
+    }
+
+    public function summarize_method( $method ): string {
+        $title = isset( $method->title ) ? (string) $method->title : ( isset( $method->method_title ) ? (string) $method->method_title : (string) $method->id );
+        $id    = (string) ( $method->id ?? '' );
+
+        $detail = '';
+        if ( $id === 'flat_rate' ) {
+            $cost = $method->get_option( 'cost', '' );
+            if ( $cost !== '' ) {
+                if ( is_numeric( $cost ) ) {
+                    $detail = sprintf( __( 'cost %s', 'kiss-woo-shipping-debugger' ), esc_html( $this->price_to_text( (float) $cost ) ) );
+                } else {
+                    // Expression/formula configured
+                    $detail = sprintf( __( 'cost expression: %s', 'kiss-woo-shipping-debugger' ), esc_html( $cost ) );
+                }
+            }
+        } elseif ( $id === 'free_shipping' ) {
+            $requires = $method->get_option( 'requires', '' ); // '', 'min_amount', 'coupon', 'either'
+            if ( $requires === 'min_amount' ) {
+                $min_amount = $method->get_option( 'min_amount', '' );
+                if ( $min_amount !== '' && is_numeric( $min_amount ) ) {
+                    $detail = sprintf( __( 'minimum order amount: %s', 'kiss-woo-shipping-debugger' ), esc_html( $this->price_to_text( (float) $min_amount ) ) );
+                } else {
+                    $detail = __( 'minimum order amount', 'kiss-woo-shipping-debugger' );
+                }
+            } elseif ( $requires === 'coupon' ) {
+                $detail = __( 'requires a valid free-shipping coupon', 'kiss-woo-shipping-debugger' );
+            } elseif ( $requires === 'either' ) {
+                $min_amount = $method->get_option( 'min_amount', '' );
+                if ( $min_amount !== '' && is_numeric( $min_amount ) ) {
+                    $detail = sprintf( __( 'coupon or minimum: %s', 'kiss-woo-shipping-debugger' ), esc_html( $this->price_to_text( (float) $min_amount ) ) );
+                } else {
+                    $detail = __( 'coupon or minimum amount', 'kiss-woo-shipping-debugger' );
+                }
+            } else {
+                $detail = __( 'no requirement', 'kiss-woo-shipping-debugger' );
+            }
+        } elseif ( $id === 'local_pickup' ) {
+            $detail = __( 'local pickup', 'kiss-woo-shipping-debugger' );
+        }
+
+        $line = esc_html( $title );
+        if ( $detail ) {
+            $line .= ' — <span style="opacity:.85;">' . $detail . '</span>';
+        }
+        return $line;
+    }
+
+    public function price_to_text( float $amount ): string {
+        if ( function_exists( 'wc_price' ) ) {
+            // wc_price returns HTML; strip tags to plain text for table cells
+            return trim( wp_strip_all_tags( wc_price( $amount ) ) );
+        }
+        // Fallback basic formatting
+        if ( floor( $amount ) == $amount ) {
+            return '$' . number_format( (int) $amount, 0 );
+        }
+        return '$' . number_format( $amount, 2 );
+    }
+
+    public function zone_edit_link( int $zone_id ): string {
+        return add_query_arg( [
+            'page'    => 'wc-settings',
+            'tab'     => 'shipping',
+            'section' => 'shipping_zones',
+            'zone_id' => $zone_id,
+        ], admin_url( 'admin.php' ) );
+    }
+
+    public function method_edit_link( int $zone_id, int $instance_id ): string {
+        return add_query_arg( [
+            'page'        => 'wc-settings',
+            'tab'         => 'shipping',
+            'section'     => 'shipping_zones',
+            'zone_id'     => $zone_id,
+            'instance_id' => $instance_id,
+        ], admin_url( 'admin.php' ) );
     }
 }
