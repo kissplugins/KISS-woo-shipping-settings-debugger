@@ -54,55 +54,104 @@ trait KISS_WSE_Scanner {
             $code   = file_get_contents( $file );
             $parser = $this->create_parser();
 
-            $ast       = $parser->parse( $code );
-            $trav      = new \PhpParser\NodeTraverser();
-            // Attach parent pointers so we can read enclosing conditions.
-            $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
-            $trav->addVisitor( $visitor );
-            $trav->traverse( $ast );
+            $ast = $parser->parse( $code );
 
-            // gather
-            $sections = [
-                'filterHooks' => $visitor->getFilterHookNodes(),
-                'feeHooks'    => $visitor->getFeeHookNodes(),
-                'rateCalls'   => $visitor->getAddRateNodes(),
-                'newRates'    => $visitor->getNewRateNodes(),
-                'unsetRates'  => $visitor->getUnsetRateNodes(),
-                'addFees'     => $visitor->getAddFeeNodes(),
-                'errors'      => $visitor->getErrorAddNodes(),
-            ];
+            $finder = new \PhpParser\NodeFinder();
+            $hook_calls = $finder->find( $ast, function( $node ) {
+                return $node instanceof \PhpParser\Node\Expr\FuncCall
+                    && $node->name instanceof \PhpParser\Node\Name
+                    && in_array( $node->name->toString(), [ 'add_filter', 'add_action' ], true )
+                    && isset( $node->args[0], $node->args[1] )
+                    && $node->args[0]->value instanceof \PhpParser\Node\Scalar\String_
+                    && in_array( $node->args[0]->value->value, [ 'woocommerce_package_rates', 'woocommerce_cart_calculate_fees' ], true );
+            } );
 
-            // Titles
-            $titles = [
-                'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
-                'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
-                'rateCalls'   => __('add_rate() Calls',    'kiss-woo-shipping-debugger'),
-                'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
-                'unsetRates'  => __('unset($rates[])',     'kiss-woo-shipping-debugger'),
-                'addFees'     => __('add_fee() Calls',     'kiss-woo-shipping-debugger'),
-                'errors'      => __('Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger'),
-            ];
-
-            foreach ( $titles as $key => $title ) {
-                if ( ! empty( $sections[ $key ] ) ) {
-                    printf( '<h4>%s</h4><ul>', esc_html( $title ) );
-                    foreach ( $sections[ $key ] as $node ) {
-                        $line = (int) $node->getLine();
-                        $desc = $this->describe_node( $key, $node );
-                        printf(
-                            '<li><strong>%s</strong> — %s %s</li>',
-                            esc_html( $this->short_explanation_label( $key ) ),
-                            esc_html( $desc ),
-                            sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
-                        );
-                    }
-                    echo '</ul>';
-                }
+            if ( empty( $hook_calls ) ) {
+                echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                continue;
             }
 
-            if ( empty( array_filter( $sections ) ) ) {
-                echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+            foreach ( $hook_calls as $hook_call ) {
+                $hook_name     = $hook_call->args[0]->value->value;
+                $callback_node = $hook_call->args[1]->value;
+                $func_node     = null;
+                $cb_label      = '';
+
+                if ( $callback_node instanceof \PhpParser\Node\Scalar\String_ ) {
+                    $cb_label = $callback_node->value;
+                    $func_node = $finder->findFirst( $ast, function( $n ) use ( $cb_label ) {
+                        return $n instanceof \PhpParser\Node\Stmt\Function_ && $n->name->toString() === $cb_label;
+                    } );
+                } elseif ( $callback_node instanceof \PhpParser\Node\Expr\Closure || $callback_node instanceof \PhpParser\Node\Expr\ArrowFunction ) {
+                    $cb_label = __( 'anonymous function', 'kiss-woo-shipping-debugger' );
+                    $func_node = $callback_node;
+                }
+
+                if ( ! $func_node ) {
+                    continue;
+                }
+
+                printf(
+                    '<h4>%s</h4>',
+                    esc_html(
+                        sprintf(
+                            /* translators: 1: callback name, 2: hook name */
+                            __( 'Callback %1$s for %2$s', 'kiss-woo-shipping-debugger' ),
+                            $cb_label,
+                            $hook_name
+                        )
+                    )
+                );
+
+                $stmts = [];
+                if ( $func_node instanceof \PhpParser\Node\Stmt\Function_ || $func_node instanceof \PhpParser\Node\Expr\Closure ) {
+                    $stmts = $func_node->stmts ?? [];
+                } elseif ( $func_node instanceof \PhpParser\Node\Expr\ArrowFunction ) {
+                    $stmts = [ $func_node->expr ];
+                }
+
+                $trav = new \PhpParser\NodeTraverser();
+                $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
+                $visitor = new \KISSShippingDebugger\RateAddCallVisitor();
+                $trav->addVisitor( $visitor );
+                $trav->traverse( $stmts );
+
+                $sections = [
+                    'rateCalls'  => $visitor->getAddRateNodes(),
+                    'newRates'   => $visitor->getNewRateNodes(),
+                    'unsetRates' => $visitor->getUnsetRateNodes(),
+                    'addFees'    => $visitor->getAddFeeNodes(),
+                    'errors'     => $visitor->getErrorAddNodes(),
+                ];
+
+                $titles = [
+                    'rateCalls'  => __( 'add_rate() Calls', 'kiss-woo-shipping-debugger' ),
+                    'newRates'   => __( 'new WC_Shipping_Rate', 'kiss-woo-shipping-debugger' ),
+                    'unsetRates' => __( 'unset($rates[])', 'kiss-woo-shipping-debugger' ),
+                    'addFees'    => __( 'add_fee() Calls', 'kiss-woo-shipping-debugger' ),
+                    'errors'     => __( 'Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger' ),
+                ];
+
+                foreach ( $titles as $key => $title ) {
+                    if ( ! empty( $sections[ $key ] ) ) {
+                        printf( '<h5>%s</h5><ul>', esc_html( $title ) );
+                        foreach ( $sections[ $key ] as $node ) {
+                            $line = (int) $node->getLine();
+                            $desc = $this->describe_node( $key, $node );
+                            printf(
+                                '<li><strong>%s</strong> — %s %s</li>',
+                                esc_html( $this->short_explanation_label( $key ) ),
+                                esc_html( $desc ),
+                                sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
+                            );
+                        }
+                        echo '</ul>';
+                    }
+                }
+
+                if ( empty( array_filter( $sections ) ) ) {
+                    echo '<p><em>' . esc_html__( 'No shipping-related calls found in this function.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                }
             }
         }
     }

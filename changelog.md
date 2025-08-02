@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.11
+* **Enhancement:** The Custom Rules Scanner now groups results by each hooked callback function, analyzing shipping logic inside individual functions.
+
 ## 1.0.10
 * **Enhancement:** Remembers the optional additional file to scan by saving it in the database.
 =======
