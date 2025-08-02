@@ -366,7 +366,7 @@ class KISS_WSE_Debugger {
             // Per-zone warnings
             $zone_issues = [];
             if ( $enabled === 0 ) {
-                $zone_issues[] = __( 'Zone has no enabled shipping methods.', 'kiss-woo-shipping-debugger' );
+            $zone_issues[] = __( 'Zone has no enabled shipping methods. You might want to add or enable at least one shipping method for this zone in WooCommerce settings.', 'kiss-woo-shipping-debugger' );
             }
             foreach ( $methods as $m ) {
                 if ( $m->id === 'free_shipping' && 'yes' === $m->enabled ) {
