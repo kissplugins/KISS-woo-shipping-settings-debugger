@@ -5,6 +5,7 @@
 trait KISS_WSE_Scanner {
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
+        require_once plugin_dir_path( __FILE__ ) . 'lib/HookedFunctionVisitor.php';
 
         // Always scan the canonical file within /inc/
         $files = [];
@@ -58,36 +59,50 @@ trait KISS_WSE_Scanner {
             $trav      = new \PhpParser\NodeTraverser();
             // Attach parent pointers so we can read enclosing conditions.
             $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
-            $trav->addVisitor( $visitor );
+            $hook_vis   = new \KISSShippingDebugger\HookedFunctionVisitor();
+            $trav->addVisitor( $hook_vis );
             $trav->traverse( $ast );
 
-            // gather
-            $sections = [
-                'filterHooks' => $visitor->getFilterHookNodes(),
-                'feeHooks'    => $visitor->getFeeHookNodes(),
-                'rateCalls'   => $visitor->getAddRateNodes(),
-                'newRates'    => $visitor->getNewRateNodes(),
-                'unsetRates'  => $visitor->getUnsetRateNodes(),
-                'addFees'     => $visitor->getAddFeeNodes(),
-                'errors'      => $visitor->getErrorAddNodes(),
-            ];
+            $functions = $hook_vis->getHookedFunctions();
 
-            // Titles
-            $titles = [
-                'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
-                'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
-                'rateCalls'   => __('add_rate() Calls',    'kiss-woo-shipping-debugger'),
-                'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
-                'unsetRates'  => __('unset($rates[])',     'kiss-woo-shipping-debugger'),
-                'addFees'     => __('add_fee() Calls',     'kiss-woo-shipping-debugger'),
-                'errors'      => __('Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger'),
-            ];
+            if ( empty( $functions ) ) {
+                echo '<p><em>' . esc_html__( 'No shipping-related hooks found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                continue;
+            }
 
-            foreach ( $titles as $key => $title ) {
-                if ( ! empty( $sections[ $key ] ) ) {
-                    printf( '<h4>%s</h4><ul>', esc_html( $title ) );
-                    foreach ( $sections[ $key ] as $node ) {
+            foreach ( $functions as $info ) {
+                $func    = $info['function'];
+                $hook    = $info['hook'];
+                $label   = $this->function_label( $func );
+                printf( '<h4>%s — <code>%s</code></h4>', esc_html( $label ), esc_html( $hook ) );
+
+                $inner_trav = new \PhpParser\NodeTraverser();
+                $inner_trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
+                $inner_vis  = new \KISSShippingDebugger\RateAddCallVisitor();
+                $inner_trav->addVisitor( $inner_vis );
+                $inner_trav->traverse( $func->getStmts() );
+
+                $sections = [
+                    'filterHooks' => $inner_vis->getFilterHookNodes(),
+                    'feeHooks'    => $inner_vis->getFeeHookNodes(),
+                    'rateCalls'   => $inner_vis->getAddRateNodes(),
+                    'newRates'    => $inner_vis->getNewRateNodes(),
+                    'unsetRates'  => $inner_vis->getUnsetRateNodes(),
+                    'addFees'     => $inner_vis->getAddFeeNodes(),
+                    'errors'      => $inner_vis->getErrorAddNodes(),
+                ];
+
+                $all = [];
+                foreach ( $sections as $key => $nodes ) {
+                    foreach ( $nodes as $n ) {
+                        $all[] = [ $key, $n ];
+                    }
+                }
+
+                if ( ! empty( $all ) ) {
+                    echo '<ul>';
+                    foreach ( $all as $pair ) {
+                        list( $key, $node ) = $pair;
                         $line = (int) $node->getLine();
                         $desc = $this->describe_node( $key, $node );
                         printf(
@@ -98,11 +113,9 @@ trait KISS_WSE_Scanner {
                         );
                     }
                     echo '</ul>';
+                } else {
+                    echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found in this function.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
                 }
-            }
-
-            if ( empty( array_filter( $sections ) ) ) {
-                echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
             }
         }
     }
@@ -117,6 +130,25 @@ trait KISS_WSE_Scanner {
             return $factory->createForNewestSupportedVersion();
         }
         return $factory->create( \PhpParser\ParserFactory::PREFER_PHP7 );
+    }
+
+    /**
+     * Generate a label for a function or method node.
+     */
+    private function function_label( $node ): string {
+        if ( $node instanceof \PhpParser\Node\Stmt\ClassMethod ) {
+            $class = $node->getAttribute( 'parent' );
+            while ( $class && ! ( $class instanceof \PhpParser\Node\Stmt\Class_ ) ) {
+                $class = $class->getAttribute( 'parent' );
+            }
+            $class_name = ( $class instanceof \PhpParser\Node\Stmt\Class_ && $class->name ) ? $class->name->toString() : '';
+            $method     = $node->name->toString();
+            return $class_name ? $class_name . '::' . $method : $method;
+        }
+        if ( $node instanceof \PhpParser\Node\Stmt\Function_ ) {
+            return $node->name->toString();
+        }
+        return sprintf( __( 'anonymous function on line %d', 'kiss-woo-shipping-debugger' ), (int) $node->getLine() );
     }
 
     /**
