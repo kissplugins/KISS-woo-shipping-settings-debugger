@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.4.0
+* **Enhancement:** The Custom Rules Scanner now resolves array variables within the scanned code. It replaces placeholders like `{restricted_states}` in rule descriptions with a human-readable list of the actual states or postal codes, providing much richer context.
+
 ## 2.3.2
 Cover multiple Product bolding via new Regex functions
 Self Test stable now

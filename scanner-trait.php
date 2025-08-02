@@ -5,6 +5,7 @@
 trait KISS_WSE_Scanner {
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
+        require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
     
         // --- 1. GATHER FILES ---
         $files_to_scan = [];
@@ -34,6 +35,7 @@ trait KISS_WSE_Scanner {
     
         // --- 2. COLLECT ALL FINDINGS FROM ALL FILES ---
         $all_findings = [];
+        $collected_arrays = []; // Master lookup for all arrays found in all files.
         foreach ( $files_to_scan as $file ) {
             echo '<h3>Scanning <code>' . esc_html( wp_make_link_relative( $file ) ) . '</code></h3>';
 
@@ -46,19 +48,26 @@ trait KISS_WSE_Scanner {
             $parser = $this->create_parser();
             $ast    = $parser->parse( $code );
             $trav   = new \PhpParser\NodeTraverser();
+
+            // Add visitors. The ArrayCollector must run before the RateAddCallVisitor.
             $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $visitor = new \KISSShippingDebugger\RateAddCallVisitor();
-            $trav->addVisitor( $visitor );
+            $array_collector = new \KISSShippingDebugger\ArrayCollectorVisitor();
+            $trav->addVisitor( $array_collector );
+            $rate_visitor = new \KISSShippingDebugger\RateAddCallVisitor();
+            $trav->addVisitor( $rate_visitor );
             $trav->traverse( $ast );
+
+            // Store the collected arrays for this file.
+            $collected_arrays[$file] = $array_collector->getArraysByScope();
     
             $sections = [
-                'errors'      => $visitor->getErrorAddNodes(),
-                'unsetRates'  => $visitor->getUnsetRateNodes(),
-                'filterHooks' => $visitor->getFilterHookNodes(),
-                'feeHooks'    => $visitor->getFeeHookNodes(),
-                'rateCalls'   => $visitor->getAddRateNodes(),
-                'newRates'    => $visitor->getNewRateNodes(),
-                'addFees'     => $visitor->getAddFeeNodes(),
+                'errors'      => $rate_visitor->getErrorAddNodes(),
+                'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+                'filterHooks' => $rate_visitor->getFilterHookNodes(),
+                'feeHooks'    => $rate_visitor->getFeeHookNodes(),
+                'rateCalls'   => $rate_visitor->getAddRateNodes(),
+                'newRates'    => $rate_visitor->getNewRateNodes(),
+                'addFees'     => $rate_visitor->getAddFeeNodes(),
             ];
     
             foreach($sections as $key => $nodes) {
@@ -77,7 +86,7 @@ trait KISS_WSE_Scanner {
         $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
     
         foreach ( $all_findings as $finding ) {
-            $description = $this->describe_node( $finding['key'], $finding['node'], true ); // Get raw description
+            $description = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'], true ); // Get raw description
             $found_keyword = 'OTHER RULES'; // Default group
     
             foreach ( $product_keywords as $keyword ) {
@@ -101,7 +110,7 @@ trait KISS_WSE_Scanner {
             foreach ( $findings as $finding ) {
                 $line = (int) $finding['node']->getLine();
                 $filename = basename( $finding['file'] );
-                $desc = $this->describe_node( $finding['key'], $finding['node'] ); // Get formatted description
+                $desc = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] ); // Get formatted description
                 
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
@@ -172,12 +181,12 @@ trait KISS_WSE_Scanner {
         return $message;
     }
 
-    private function describe_node( string $key, \PhpParser\Node $node, bool $raw = false ): string {
+    private function describe_node( string $key, \PhpParser\Node $node, array $collected_arrays, string $current_file, bool $raw = false ): string {
         try {
             switch ( $key ) {
                 case 'errors':
                     if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
-                        $msg = $this->extract_string( $node->args[1]->value );
+                        $msg = $this->extract_string( $node->args[1]->value, $collected_arrays, $current_file );
                         if ( $msg !== '' ) {
                             $formatted_msg = $raw ? $msg : $this->format_error_message( $msg );
                             return sprintf(
@@ -219,15 +228,15 @@ trait KISS_WSE_Scanner {
                     $parts = [];
                     if ( property_exists( $node, 'args' ) ) {
                         $idExpr = isset( $node->args[0] ) ? $node->args[0]->value : null;
-                        $id     = $this->string_or_resolved_variable( $node, $idExpr );
+                        $id     = $this->string_or_resolved_variable( $node, $idExpr, $collected_arrays, $current_file );
 
-                        $label  = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value ) : '';
-                        $cost   = isset( $node->args[2] ) ? $this->extract_string_or_placeholder( $node->args[2]->value ) : '';
+                        $label  = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value, $collected_arrays, $current_file ) : '';
+                        $cost   = isset( $node->args[2] ) ? $this->extract_string_or_placeholder( $node->args[2]->value, $collected_arrays, $current_file ) : '';
                         if ( $id !== '' )    { $parts[] = sprintf( __( 'id “%s”', 'kiss-woo-shipping-debugger' ), $id ); }
                         if ( $label !== '' ) { $parts[] = sprintf( __( 'label “%s”', 'kiss-woo-shipping-debugger' ), $label ); }
                         if ( $cost !== '' )  { $parts[] = sprintf( __( 'cost %s', 'kiss-woo-shipping-debugger' ), $cost ); }
                     }
-                    $when = $this->condition_chain_text( $node );
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
                     $summary = __( 'Instantiates WC_Shipping_Rate directly, creating a shipping option in code.', 'kiss-woo-shipping-debugger' );
                     if ( ! empty( $parts ) ) {
                         $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
@@ -238,8 +247,8 @@ trait KISS_WSE_Scanner {
                     return $summary;
 
                 case 'unsetRates':
-                    $keyStr = $this->extract_unset_rate_key( $node );
-                    $when   = $this->condition_chain_text( $node );
+                    $keyStr = $this->extract_unset_rate_key( $node, $collected_arrays, $current_file );
+                    $when   = $this->condition_chain_text( $node, $collected_arrays, $current_file );
                     $summary = '';
                     if ( $this->condition_mentions_free_shipping( $node ) ) {
                         $summary = __( 'Removes the free shipping rate', 'kiss-woo-shipping-debugger' );
@@ -259,18 +268,18 @@ trait KISS_WSE_Scanner {
                 case 'addFees':
                     $parts = [];
                     if ( property_exists( $node, 'args' ) ) {
-                        $label  = isset( $node->args[0] ) ? $this->extract_string_or_placeholder( $node->args[0]->value ) : '';
+                        $label  = isset( $node->args[0] ) ? $this->extract_string_or_placeholder( $node->args[0]->value, $collected_arrays, $current_file ) : '';
 
                         if ( isset( $node->args[1] ) && $node->args[1]->value instanceof \PhpParser\Node\Expr\Variable ) {
                             $amount = $this->describe_variable_assignment( $node->args[1]->value );
                         } else {
-                            $amount = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value ) : '';
+                            $amount = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value, $collected_arrays, $current_file ) : '';
                         }
 
                         if ( $label !== '' )  { $parts[] = sprintf( __( 'label “%s”', 'kiss-woo-shipping-debugger' ), $label ); }
                         if ( $amount !== '' ) { $parts[] = sprintf( __( 'amount %s', 'kiss-woo-shipping-debugger' ), $amount ); }
                     }
-                    $when    = $this->condition_chain_text( $node );
+                    $when    = $this->condition_chain_text( $node, $collected_arrays, $current_file );
                     $summary = __( 'Adds a fee to the cart.', 'kiss-woo-shipping-debugger' );
                     if ( ! empty( $parts ) ) {
                         $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
@@ -287,7 +296,7 @@ trait KISS_WSE_Scanner {
         }
     }
 
-    private function extract_string( $expr ): string {
+    private function extract_string( $expr, array $collected_arrays, string $current_file ): string {
         if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
             return (string) $expr->value;
         }
@@ -298,14 +307,14 @@ trait KISS_WSE_Scanner {
                 if ( $p instanceof \PhpParser\Node\Scalar\EncapsedStringPart ) {
                     $out .= $p->value;
                 } else {
-                    $out .= $this->expr_placeholder( $p );
+                    $out .= $this->expr_placeholder( $p, $collected_arrays, $current_file );
                 }
             }
             return $out;
         }
 
         if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
-            return $this->extract_string( $expr->left ) . $this->extract_string( $expr->right );
+            return $this->extract_string( $expr->left, $collected_arrays, $current_file ) . $this->extract_string( $expr->right, $collected_arrays, $current_file );
         }
 
         if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
@@ -313,14 +322,14 @@ trait KISS_WSE_Scanner {
 
             $i18n = [ '__', 'esc_html__', 'esc_attr__', '_x', '_nx', '_ex' ];
             if ( in_array( $fn, $i18n, true ) && isset( $expr->args[0] ) ) {
-                return $this->extract_string( $expr->args[0]->value );
+                return $this->extract_string( $expr->args[0]->value, $collected_arrays, $current_file );
             }
 
             if ( $fn === 'sprintf' && isset( $expr->args[0] ) ) {
-                $fmt = $this->extract_string( $expr->args[0]->value );
+                $fmt = $this->extract_string( $expr->args[0]->value, $collected_arrays, $current_file );
                 $argTokens = [];
                 for ( $i = 1; isset( $expr->args[$i] ); $i++ ) {
-                    $argTokens[] = $this->expr_placeholder( $expr->args[$i]->value );
+                    $argTokens[] = $this->expr_placeholder( $expr->args[$i]->value, $collected_arrays, $current_file );
                 }
                 $idx = 0;
                 $out = preg_replace_callback('/%[%bcdeEufFgGosxX]/', function($m) use (&$idx, $argTokens) {
@@ -332,35 +341,49 @@ trait KISS_WSE_Scanner {
                 return $out ?? $fmt;
             }
         }
-        return $this->expr_placeholder( $expr );
+        return $this->expr_placeholder( $expr, $collected_arrays, $current_file );
     }
 
-    private function extract_string_or_placeholder( $expr ): string {
-        $s = $this->extract_string( $expr );
+    private function extract_string_or_placeholder( $expr, array $collected_arrays, string $current_file ): string {
+        $s = $this->extract_string( $expr, $collected_arrays, $current_file );
         if ( $s !== '' && $s[0] !== '{' ) {
             return $s;
         }
-        return $this->expr_placeholder( $expr );
+        return $this->expr_placeholder( $expr, $collected_arrays, $current_file );
     }
 
-    private function expr_placeholder( $expr ): string {
+    private function expr_placeholder( $expr, array $collected_arrays, string $current_file ): string {
         try {
             if ( $expr instanceof \PhpParser\Node\Expr\Variable ) {
                 return '{' . (is_string($expr->name) ? $expr->name : '?') . '}';
             }
             if ( $expr instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
-                $var  = $this->expr_placeholder( $expr->var );
-                $dim  = $expr->dim ? $this->extract_string( $expr->dim ) : '';
-                if ( $dim === '' && $expr->dim ) $dim = $this->expr_placeholder( $expr->dim );
+                // This is where we try to resolve the array.
+                if ( $expr->var instanceof \PhpParser\Node\Expr\Variable && is_string( $expr->var->name ) ) {
+                    $var_name  = $expr->var->name;
+                    $scope_key = $this->getCurrentScopeKey( $expr );
+                    $file_arrays = $collected_arrays[$current_file] ?? [];
+
+                    if ( isset( $file_arrays[$scope_key][$var_name] ) ) {
+                        $array_data = $file_arrays[$scope_key][$var_name];
+                        if( is_array($array_data) ) {
+                            return $this->format_array_for_display( array_values($array_data) );
+                        }
+                    }
+                }
+                // Fallback to old behavior
+                $var  = $this->expr_placeholder( $expr->var, $collected_arrays, $current_file );
+                $dim  = $expr->dim ? $this->extract_string( $expr->dim, $collected_arrays, $current_file ) : '';
+                if ( $dim === '' && $expr->dim ) $dim = $this->expr_placeholder( $expr->dim, $collected_arrays, $current_file );
                 return str_replace(['{','}'],'',$var) ? '{' . trim($var, '{}') . '[' . $dim . ']}' : '{array[' . $dim . ']}';
             }
             if ( $expr instanceof \PhpParser\Node\Expr\PropertyFetch ) {
-                $obj = trim( $this->expr_placeholder( $expr->var ), '{}' );
+                $obj = trim( $this->expr_placeholder( $expr->var, $collected_arrays, $current_file ), '{}' );
                 $prop = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
                 return '{' . $obj . '->' . $prop . '}';
             }
             if ( $expr instanceof \PhpParser\Node\Expr\MethodCall ) {
-                $obj = trim( $this->expr_placeholder( $expr->var ), '{}' );
+                $obj = trim( $this->expr_placeholder( $expr->var, $collected_arrays, $current_file ), '{}' );
                 $meth = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
                 return '{' . $obj . '->' . $meth . '()}';
             }
@@ -382,7 +405,7 @@ trait KISS_WSE_Scanner {
                 return '{' . $expr->name->toString() . '()}';
             }
             if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
-                return $this->extract_string( $expr );
+                return $this->extract_string( $expr, $collected_arrays, $current_file );
             }
         } catch ( \Throwable $e ) {
             // ignore and fall through
@@ -405,7 +428,7 @@ trait KISS_WSE_Scanner {
         return '';
     }
 
-    private function extract_unset_rate_key( \PhpParser\Node $unsetStmt ): string {
+    private function extract_unset_rate_key( \PhpParser\Node $unsetStmt, array $collected_arrays, string $current_file ): string {
         try {
             if ( $unsetStmt instanceof \PhpParser\Node\Stmt\Unset_ && isset( $unsetStmt->vars[0] ) && $unsetStmt->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
 
@@ -420,9 +443,9 @@ trait KISS_WSE_Scanner {
                     }
                 }
                 if ( $dim ) {
-                    $ph = $this->extract_string( $dim );
+                    $ph = $this->extract_string( $dim, $collected_arrays, $current_file );
                     if ( $ph === '' ) {
-                        $ph = $this->expr_placeholder( $dim );
+                        $ph = $this->expr_placeholder( $dim, $collected_arrays, $current_file );
                     }
                     return $ph;
                 }
@@ -433,14 +456,14 @@ trait KISS_WSE_Scanner {
         return '';
     }
 
-    private function string_or_resolved_variable( \PhpParser\Node $ctx, $expr ): string {
+    private function string_or_resolved_variable( \PhpParser\Node $ctx, $expr, array $collected_arrays, string $current_file ): string {
         if ( $expr instanceof \PhpParser\Node\Expr\Variable && is_string( $expr->name ) ) {
             $val = $this->resolve_variable_value( $ctx, $expr->name );
             if ( is_string( $val ) && $val !== '' ) {
                 return $val;
             }
         }
-        return $this->extract_string_or_placeholder( $expr );
+        return $this->extract_string_or_placeholder( $expr, $collected_arrays, $current_file );
     }
 
     private function resolve_variable_value( \PhpParser\Node $fromNode, string $varName ): ?string {
@@ -466,7 +489,7 @@ trait KISS_WSE_Scanner {
                 if ( $as->var instanceof \PhpParser\Node\Expr\Variable && is_string( $as->var->name ) && $as->var->name === $varName ) {
                     $ln = (int) $as->getLine();
                     if ( $ln < $line && $ln > $bestLn ) {
-                        $str = $this->extract_string( $as->expr );
+                        $str = $this->extract_string( $as->expr, [], '' ); // No array context here, it's a simple value lookup
                         if ( $str === '' ) {
                             if ( $as->expr instanceof \PhpParser\Node\Scalar\String_ ) {
                                 $str = $as->expr->value;
@@ -485,14 +508,14 @@ trait KISS_WSE_Scanner {
         }
     }
 
-    private function condition_chain_text( \PhpParser\Node $node ): string {
+    private function condition_chain_text( \PhpParser\Node $node, array $collected_arrays, string $current_file ): string {
         $conds = [];
         $cur = $node;
         $limit = 4;
         while ( $limit-- > 0 && $cur ) {
             $parent = $cur->getAttribute('parent');
             if ( $parent instanceof \PhpParser\Node\Stmt\If_ ) {
-                $desc = $this->cond_to_text( $parent->cond );
+                $desc = $this->cond_to_text( $parent->cond, $collected_arrays, $current_file );
                 if ( $desc !== '' ) $conds[] = $desc;
             }
             $cur = $parent instanceof \PhpParser\Node ? $parent : null;
@@ -506,7 +529,7 @@ trait KISS_WSE_Scanner {
         try {
             $varName = is_string( $var->name ) ? $var->name : null;
             if ( ! $varName ) {
-                return $this->expr_placeholder( $var );
+                return $this->expr_placeholder( $var, [], '' );
             }
 
             $scope = null;
@@ -518,7 +541,7 @@ trait KISS_WSE_Scanner {
                 }
                 if ( ! $cur instanceof \PhpParser\Node ) break;
             }
-            if ( ! $scope ) return $this->expr_placeholder( $var );
+            if ( ! $scope ) return $this->expr_placeholder( $var, [], '' );
 
             $finder  = new \PhpParser\NodeFinder();
             /** @var \PhpParser\Node\Expr\Assign[] $assigns */
@@ -527,37 +550,62 @@ trait KISS_WSE_Scanner {
                 fn( $a ) => ( $a->var instanceof \PhpParser\Node\Expr\Variable && $a->var->name === $varName && $a->getLine() < $var->getLine() )
             );
 
-            if ( empty( $assigns ) ) return $this->expr_placeholder( $var );
+            if ( empty( $assigns ) ) return $this->expr_placeholder( $var, [], '' );
             $lastAssign = end( $assigns );
 
             if ( $lastAssign->expr instanceof \PhpParser\Node\Expr\Match_ ) {
                 return __( 'is determined by conditional logic (a match statement)', 'kiss-woo-shipping-debugger' );
             }
         } catch ( \Throwable $e ) {} // Fall through on error
-        return $this->expr_placeholder( $var );
+        return $this->expr_placeholder( $var, [], '' );
     }
 
-    private function cond_to_text( $expr ): string {
+    private function cond_to_text( $expr, array $collected_arrays, string $current_file ): string {
         try {
+            // Handle isset($restricted_states[$state]) and array_key_exists($state, $restricted_states)
+            $is_array_check = false;
+            $array_var_node = null;
+            if ( $expr instanceof \PhpParser\Node\Expr\Isset_ && isset( $expr->vars[0] ) && $expr->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
+                $is_array_check = true;
+                $array_var_node = $expr->vars[0]->var;
+            } elseif ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name && strtolower($expr->name->toString()) === 'array_key_exists' && isset($expr->args[1]) ) {
+                $is_array_check = true;
+                $array_var_node = $expr->args[1]->value;
+            }
+
+            if( $is_array_check && $array_var_node instanceof \PhpParser\Node\Expr\Variable && is_string( $array_var_node->name ) ) {
+                $var_name  = $array_var_node->name;
+                $scope_key = $this->getCurrentScopeKey( $expr );
+                $file_arrays = $collected_arrays[$current_file] ?? [];
+                
+                if ( isset( $file_arrays[$scope_key][$var_name] ) ) {
+                    $array_data = $file_arrays[$scope_key][$var_name];
+                    if( is_array($array_data) && !empty($array_data) ) {
+                        $list = $this->format_array_for_display( array_values($array_data) );
+                        return sprintf( __( 'the location is one of: %s', 'kiss-woo-shipping-debugger' ), '<strong>' . esc_html( $list ) . '</strong>' );
+                    }
+                }
+            }
+
             if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\BooleanAnd ) {
-                $left = $this->cond_to_text( $expr->left );
-                $right = $this->cond_to_text( $expr->right );
+                $left = $this->cond_to_text( $expr->left, $collected_arrays, $current_file );
+                $right = $this->cond_to_text( $expr->right, $collected_arrays, $current_file );
                 $glue = ' ' . __( 'and', 'kiss-woo-shipping-debugger' ) . ' ';
                 return trim( $left ) . $glue . trim( $right );
             }
             if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\BooleanOr ) {
-                $left = $this->cond_to_text( $expr->left );
-                $right = $this->cond_to_text( $expr->right );
+                $left = $this->cond_to_text( $expr->left, $collected_arrays, $current_file );
+                $right = $this->cond_to_text( $expr->right, $collected_arrays, $current_file );
                 $glue = ' ' . __( 'or', 'kiss-woo-shipping-debugger' ) . ' ';
                 return trim( $left ) . $glue . trim( $right );
             }
 
-            $isFreeShip = function($call) {
+            $isFreeShip = function($call) use ($collected_arrays, $current_file) {
                 return ($call instanceof \PhpParser\Node\Expr\FuncCall)
                     && ($call->name instanceof \PhpParser\Node\Name)
                     && (strtolower($call->name->toString()) === 'strpos')
                     && isset($call->args[1])
-                    && strtolower($this->extract_string($call->args[1]->value)) === 'free_shipping';
+                    && strtolower($this->extract_string($call->args[1]->value, $collected_arrays, $current_file)) === 'free_shipping';
             };
             if ( ($expr instanceof \PhpParser\Node\Expr\BinaryOp\NotIdentical || $expr instanceof \PhpParser\Node\Expr\BinaryOp\NotEqual)
                  && (
@@ -589,12 +637,12 @@ trait KISS_WSE_Scanner {
                             default:   return 'adjusted_total ' . $op . ' ' . $num;
                         }
                     }
-                    return $this->simple_expr_text( $expr->left ) . ' ' . $op . ' ' . $this->simple_expr_text( $expr->right );
+                    return $this->simple_expr_text( $expr->left, $collected_arrays, $current_file ) . ' ' . $op . ' ' . $this->simple_expr_text( $expr->right, $collected_arrays, $current_file );
                 }
             }
 
             if ( $expr instanceof \PhpParser\Node\Expr\BooleanNot ) {
-                $inner = $this->simple_expr_text( $expr->expr );
+                $inner = $this->simple_expr_text( $expr->expr, $collected_arrays, $current_file );
                 if ( $this->is_var_named( $expr->expr, 'has_drinks' ) ) {
                     return __( 'the cart does not contain drinks', 'kiss-woo-shipping-debugger' );
                 }
@@ -605,7 +653,7 @@ trait KISS_WSE_Scanner {
                 return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
             }
 
-            return $this->simple_expr_text( $expr );
+            return $this->simple_expr_text( $expr, $collected_arrays, $current_file );
         } catch ( \Throwable $e ) {
             return '';
         }
@@ -627,20 +675,20 @@ trait KISS_WSE_Scanner {
         return $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber;
     }
 
-    private function simple_expr_text( $expr ): string {
+    private function simple_expr_text( $expr, array $collected_arrays, string $current_file ): string {
         if ( $this->is_var_named( $expr, 'has_drinks' ) ) return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
         if ( $this->is_var_named( $expr, 'adjusted_total' ) ) return __( 'the non-drink subtotal', 'kiss-woo-shipping-debugger' );
         if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) return "'" . $expr->value . "'";
         if ( $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber ) return (string) $expr->value;
         if ( $expr instanceof \PhpParser\Node\Expr\Variable ) return (is_string($expr->name) ? (string)$expr->name : '{var}');
         if ( $expr instanceof \PhpParser\Node\Expr\PropertyFetch ) {
-            $obj = $this->simple_expr_text( $expr->var );
+            $obj = $this->simple_expr_text( $expr->var, $collected_arrays, $current_file );
             $prop = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
             return $obj . '->' . $prop;
         }
         if ( $expr instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
-            $arr = $this->simple_expr_text( $expr->var );
-            $dim = $expr->dim ? $this->simple_expr_text( $expr->dim ) : '';
+            $arr = $this->simple_expr_text( $expr->var, $collected_arrays, $current_file );
+            $dim = $expr->dim ? $this->simple_expr_text( $expr->dim, $collected_arrays, $current_file ) : '';
             return $arr . '[' . $dim . ']';
         }
         if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
@@ -649,7 +697,7 @@ trait KISS_WSE_Scanner {
         if ( $expr instanceof \PhpParser\Node\Expr\ConstFetch && $expr->name instanceof \PhpParser\Node\Name ) {
             return $expr->name->toString();
         }
-        return $this->expr_placeholder( $expr );
+        return $this->expr_placeholder( $expr, $collected_arrays, $current_file );
     }
 
     private function condition_mentions_free_shipping( \PhpParser\Node $node ): bool {
@@ -664,7 +712,7 @@ trait KISS_WSE_Scanner {
                         && ($call->name instanceof \PhpParser\Node\Name)
                         && (strtolower($call->name->toString()) === 'strpos')
                         && isset($call->args[1])
-                        && strtolower($this->extract_string($call->args[1]->value)) === 'free_shipping';
+                        && strtolower($this->extract_string($call->args[1]->value, [], '')) === 'free_shipping';
                 };
                 if ( ($cond instanceof \PhpParser\Node\Expr\BinaryOp\NotIdentical || $cond instanceof \PhpParser\Node\Expr\BinaryOp\NotEqual)
                      && (
@@ -677,5 +725,65 @@ trait KISS_WSE_Scanner {
             $cur = $parent instanceof \PhpParser\Node ? $parent : null;
         }
         return false;
+    }
+
+    /**
+     * Traverses parent nodes to determine the current function/method/closure scope.
+     * Copied from ArrayCollectorVisitor to be available in the description context.
+     */
+    private function getCurrentScopeKey(\PhpParser\Node $node): string {
+        $parent = $node->getAttribute('parent');
+        while ($parent) {
+            if ($parent instanceof \PhpParser\Node\FunctionLike) {
+                if ($parent instanceof \PhpParser\Node\Stmt\ClassMethod) {
+                    $className = '__anonymous';
+                    $classParent = $parent->getAttribute('parent');
+                    if ($classParent instanceof \PhpParser\Node\Stmt\Class_ && $classParent->name instanceof \PhpParser\Node\Identifier) {
+                        $className = $classParent->name->toString();
+                    }
+                    return $className . '::' . $parent->name->toString();
+                }
+
+                if ($parent instanceof \PhpParser\Node\Stmt\Function_) {
+                    return $parent->name->toString();
+                }
+
+                if ($parent instanceof \PhpParser\Node\Expr\Closure) {
+                    return 'closure@line:' . $parent->getStartLine();
+                }
+            }
+            $parent = $parent->getAttribute('parent');
+        }
+        return '__global__';
+    }
+
+    /**
+     * Formats an array of strings into a human-readable list based on size.
+     */
+    private function format_array_for_display(array $items): string {
+        $count = count($items);
+        if ($count === 0) {
+            return __( 'an empty list', 'kiss-woo-shipping-debugger' );
+        }
+
+        // Use only string values, filter out others.
+        $string_items = array_filter($items, 'is_string');
+        $count = count($string_items);
+
+        if ($count <= 8) {
+            return implode(', ', $string_items);
+        }
+
+        if ($count <= 20) {
+            $first_part = array_slice($string_items, 0, 6);
+            $more_count = $count - 6;
+            return sprintf(
+                '%s %s',
+                implode(', ', $first_part),
+                sprintf( __( 'and %d more', 'kiss-woo-shipping-debugger' ), $more_count )
+            );
+        }
+
+        return sprintf( __( '%d items', 'kiss-woo-shipping-debugger' ), $count );
     }
 }

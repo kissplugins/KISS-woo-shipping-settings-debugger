@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     2.3.2
+ * Version:     2.4.0
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -127,7 +127,7 @@ trait KISS_WSE_Testable {
                 printf( '<h4>%s</h4><ul>', esc_html( $title ) );
                 foreach ( $sections[ $key ] as $node ) {
                     $desc = $this->describe_node( $key, $node );
-                    // Use wp_kses_post to allow <code> tags in test output
+                    // Use wp_kses_post to allow code> tags in test output
                     printf( '<li>%s</li>', wp_kses_post( $desc ) );
                 }
                 echo '</ul>';
