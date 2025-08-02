@@ -5,99 +5,114 @@
 trait KISS_WSE_Scanner {
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
-
-        $files = [];
+    
+        // --- 1. GATHER FILES ---
+        $files_to_scan = [];
         $default_file = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc/shipping-restrictions.php' );
         if ( file_exists($default_file) ) {
-            $files[] = $default_file;
+            $files_to_scan[] = $default_file;
         }
-
+    
         $base_dir  = wp_normalize_path( get_stylesheet_directory() );
         $base_real = realpath( $base_dir );
-
+    
         if ( $additional && $base_real ) {
             $rel   = ltrim( wp_normalize_path( $additional ), '/\\' );
             $try   = wp_normalize_path( $base_real . DIRECTORY_SEPARATOR . $rel );
             $real  = realpath( $try );
-
-            if ( $real ) {
+    
+            if ( $real && is_file($real) ) {
                 $real_norm = wp_normalize_path( $real );
                 $base_norm = wp_normalize_path( $base_real );
-                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && is_file( $real ) ) {
-                    if ( ! in_array($real, $files) ) {
-                        $files[] = $real;
-                    }
-                } else {
-                    echo '<div class="notice notice-warning"><p>' .
-                         esc_html__( 'Invalid file path. The additional file must be inside the active child theme’s directory.', 'kiss-woo-shipping-debugger' ) .
-                         '</p></div>';
+                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && !in_array($real, $files_to_scan) ) {
+                    $files_to_scan[] = $real;
                 }
             } else {
-                echo '<div class="notice notice-warning"><p>' .
-                     esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) .
-                     '</p></div>';
+                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
             }
         }
+    
+        // --- 2. COLLECT ALL FINDINGS FROM ALL FILES ---
+        $all_findings = [];
+        foreach ( $files_to_scan as $file ) {
+            echo '<h3>Scanning <code>' . esc_html( wp_make_link_relative( $file ) ) . '</code></h3>';
 
-        foreach ( $files as $file ) {
-            printf( '<h3>Scanning <code>%s</code></h3>', esc_html( wp_make_link_relative( $file ) ) );
-
-            // If parser isn't available, skip with a message
             if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
-                echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan file:', 'kiss-woo-shipping-debugger' ) . ' ' . esc_html(wp_make_link_relative($file)) . '</em></p>';
                 continue;
             }
-
+    
             $code   = file_get_contents( $file );
             $parser = $this->create_parser();
-
-            $ast       = $parser->parse( $code );
-            $trav      = new \PhpParser\NodeTraverser();
+            $ast    = $parser->parse( $code );
+            $trav   = new \PhpParser\NodeTraverser();
             $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
+            $visitor = new \KISSShippingDebugger\RateAddCallVisitor();
             $trav->addVisitor( $visitor );
             $trav->traverse( $ast );
-
+    
             $sections = [
+                'errors'      => $visitor->getErrorAddNodes(),
+                'unsetRates'  => $visitor->getUnsetRateNodes(),
                 'filterHooks' => $visitor->getFilterHookNodes(),
                 'feeHooks'    => $visitor->getFeeHookNodes(),
                 'rateCalls'   => $visitor->getAddRateNodes(),
                 'newRates'    => $visitor->getNewRateNodes(),
-                'unsetRates'  => $visitor->getUnsetRateNodes(),
                 'addFees'     => $visitor->getAddFeeNodes(),
-                'errors'      => $visitor->getErrorAddNodes(),
             ];
-
-            $titles = [
-                'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
-                'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
-                'rateCalls'   => __('add_rate() Calls',    'kiss-woo-shipping-debugger'),
-                'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
-                'unsetRates'  => __('unset($rates[])',     'kiss-woo-shipping-debugger'),
-                'addFees'     => __('add_fee() Calls',     'kiss-woo-shipping-debugger'),
-                'errors'      => __('Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger'),
-            ];
-
-            foreach ( $titles as $key => $title ) {
-                if ( ! empty( $sections[ $key ] ) ) {
-                    printf( '<h4>%s</h4><ul>', esc_html( $title ) );
-                    foreach ( $sections[ $key ] as $node ) {
-                        $line = (int) $node->getLine();
-                        $desc = $this->describe_node( $key, $node );
-                        printf(
-                            '<li><strong>%s</strong> — %s %s</li>',
-                            esc_html( $this->short_explanation_label( $key ) ),
-                            wp_kses_post( $desc ),
-                            sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
-                        );
-                    }
-                    echo '</ul>';
+    
+            foreach($sections as $key => $nodes) {
+                foreach($nodes as $node) {
+                    $all_findings[] = [
+                        'file' => $file,
+                        'key'  => $key,
+                        'node' => $node,
+                    ];
                 }
             }
-
-            if ( empty( array_filter( $sections ) ) ) {
-                echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+        }
+    
+        // --- 3. GROUP FINDINGS BY PRODUCT KEYWORD ---
+        $grouped_rules = [];
+        $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
+    
+        foreach ( $all_findings as $finding ) {
+            $description = $this->describe_node( $finding['key'], $finding['node'], true ); // Get raw description
+            $found_keyword = 'OTHER RULES'; // Default group
+    
+            foreach ( $product_keywords as $keyword ) {
+                if ( stripos( $description, $keyword ) !== false ) {
+                    $found_keyword = strtoupper($keyword);
+                    break;
+                }
             }
+            $grouped_rules[$found_keyword][] = $finding;
+        }
+
+        // --- 4. RENDER THE GROUPED OUTPUT ---
+        if ( empty($grouped_rules) ) {
+            echo '<p><em>' . esc_html__( 'No shipping-related rules found in the scanned files.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+            return;
+        }
+    
+        foreach ( $grouped_rules as $product => $findings ) {
+            printf( '<h4><strong>%s</strong></h4>', esc_html( $product ) );
+            echo '<ul>';
+            foreach ( $findings as $finding ) {
+                $line = (int) $finding['node']->getLine();
+                // ADDED: Get the base filename from the full path.
+                $filename = basename( $finding['file'] );
+                $desc = $this->describe_node( $finding['key'], $finding['node'] ); // Get formatted description
+                
+                // CHANGED: The final sprintf now includes the filename.
+                printf(
+                    '<li><strong>%s</strong> — %s %s</li>',
+                    esc_html( $this->short_explanation_label( $finding['key'] ) ),
+                    wp_kses_post( $desc ),
+                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                );
+            }
+            echo '</ul>';
         }
     }
 
@@ -143,7 +158,6 @@ trait KISS_WSE_Scanner {
         // 3. Bold state names that appear after "to" or "for"
         $states = ['Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'];
         $states_pattern = implode('|', $states);
-        // CHANGED: Added "for" to the list of prepositions to look for before a state name.
         $message = preg_replace(
             "/\b(to|for)\s+({$states_pattern})\b/i",
             '$1 <strong>$2</strong>',
@@ -153,14 +167,14 @@ trait KISS_WSE_Scanner {
         return $message;
     }
 
-    private function describe_node( string $key, \PhpParser\Node $node ): string {
+    private function describe_node( string $key, \PhpParser\Node $node, bool $raw = false ): string {
         try {
             switch ( $key ) {
                 case 'errors':
                     if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
                         $msg = $this->extract_string( $node->args[1]->value );
                         if ( $msg !== '' ) {
-                            $formatted_msg = $this->format_error_message( $msg );
+                            $formatted_msg = $raw ? $msg : $this->format_error_message( $msg );
                             return sprintf(
                                 __( 'Adds a checkout error message: “%s”. Customers will be blocked until they resolve it.', 'kiss-woo-shipping-debugger' ),
                                 $formatted_msg
@@ -168,8 +182,6 @@ trait KISS_WSE_Scanner {
                         }
                     }
                     return __( 'Adds a checkout error message.', 'kiss-woo-shipping-debugger' );
-
-                // ... other cases remain unchanged ...
 
                 case 'filterHooks':
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
