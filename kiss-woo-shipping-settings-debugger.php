@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     2.1.0
+ * Version:     2.3.1
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -37,6 +37,7 @@ function kiss_wse_initialize_debugger(): void {
  */
 class KISS_WSE_Debugger {
     private string $page_slug = 'kiss-wse-export';
+    private string $self_test_slug = 'kiss-wse-self-test';
     use KISS_WSE_Preview, KISS_WSE_Scanner;
 
     /**
@@ -49,7 +50,7 @@ class KISS_WSE_Debugger {
         }
 
         add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
-        add_action( 'admin_menu', [ $this, 'register_menu' ] );
+        add_action( 'admin_menu', [ $this, 'register_menu' ], 99 );
         add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
     }
 
@@ -73,9 +74,14 @@ class KISS_WSE_Debugger {
      * Add a convenient settings link on the plugins page.
      */
     public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'tools.php?page=' . $this->page_slug ) );
-        $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
-        array_unshift( $links, "<a href=\"$url\">$text</a>" );
+        $scan_url = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
+        $self_test_path = '../' . plugin_basename( dirname( KISS_WSE_PLUGIN_FILE ) ) . '/self-test.php';
+        $test_scan_url = esc_url( admin_url( 'admin.php?page=' . $this->page_slug . '&wse_additional_file=' . rawurlencode( $self_test_path ) ) );
+
+
+        $links['scan'] = sprintf( '<a href="%s">%s</a>', $scan_url, esc_html__( 'Scan Settings', 'kiss-woo-shipping-debugger' ) );
+        $links['self_test'] = sprintf( '<a href="%s">%s</a>', $test_scan_url, esc_html__( 'Self Test', 'kiss-woo-shipping-debugger' ) );
+
         return $links;
     }
 
@@ -83,12 +89,23 @@ class KISS_WSE_Debugger {
      * Register the Tools submenu page for the debugger UI.
      */
     public function register_menu(): void {
-        add_management_page(
-            __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'KISS Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+        add_submenu_page(
+            'woocommerce',
+            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
             'manage_woocommerce',
             $this->page_slug,
-            [ $this, 'render_page' ]
+            [ $this, 'render_page' ],
+            99
+        );
+
+        add_submenu_page(
+            $this->page_slug,
+            __( 'Self-Test', 'kiss-woo-shipping-debugger' ),
+            __( 'Self-Test', 'kiss-woo-shipping-debugger' ),
+            'manage_woocommerce',
+            $this->self_test_slug,
+            [ $this, 'render_self_test_page' ]
         );
     }
 
@@ -148,24 +165,24 @@ class KISS_WSE_Debugger {
 
         // --- Custom Rules Scanner UI ---
         echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
-        echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
+        echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST. The scanner will always check for `inc/shipping-restrictions.php`.', 'kiss-woo-shipping-debugger' ) . '</p>';
         printf(
             '<form method="get" style="padding:1em;border:1px solid #c3c4c7;background:#fff;">
                 <input type="hidden" name="page" value="%1$s">
                 <p>
                   <label><strong>%2$s</strong></label><br>
-                  <span style="font-family:monospace;">%3$s/inc</span>
-                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="extra.php" value="%4$s">
+                  <span style="font-family:monospace;">%3$s/</span>
+                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="inc/woo-functions.php" value="%4$s">
                   <br><em>%6$s</em>
                 </p>
                 <p><button type="submit" class="button">%5$s</button></p>
              </form>',
             esc_attr( $this->page_slug ),
-            esc_html__( 'Scan Additional Theme File (Optional)', 'kiss-woo-shipping-debugger' ),
-            esc_html( get_stylesheet_directory() ),
+            esc_html__( 'Scan Additional File (Optional)', 'kiss-woo-shipping-debugger' ),
+            esc_html( basename( get_stylesheet_directory() ) ),
             esc_attr( $additional ),
             esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
-            esc_html__( 'Path is restricted to the active child theme’s /inc/ directory (e.g., "extra.php" or "subdir/custom.php").', 'kiss-woo-shipping-debugger' )
+            esc_html__( 'Path is relative to the active theme directory.', 'kiss-woo-shipping-debugger' )
         );
 
         try {
@@ -196,6 +213,38 @@ class KISS_WSE_Debugger {
 
         echo '</div>';
     }
+
+    /**
+     * Renders the self-test information page.
+     */
+    public function render_self_test_page(): void {
+        $test_file_path = '../' . plugin_basename( dirname( KISS_WSE_PLUGIN_FILE ) ) . '/self-test.php';
+        $scan_url = admin_url( 'admin.php?page=' . $this->page_slug . '&wse_additional_file=' . rawurlencode( $test_file_path ) );
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e( 'Scanner Self-Test', 'kiss-woo-shipping-debugger' ); ?></h1>
+            <div class="notice notice-info">
+                <p><?php esc_html_e( 'This tool helps verify that the scanner can correctly identify a variety of shipping logic patterns.', 'kiss-woo-shipping-debugger' ); ?></p>
+            </div>
+            <h2><?php esc_html_e( 'How to Use', 'kiss-woo-shipping-debugger' ); ?></h2>
+            <p><?php esc_html_e( 'The self-test works by scanning a special file included with this plugin that contains known shipping code patterns. Clicking the button below will take you to the scanner with the correct file path pre-filled.', 'kiss-woo-shipping-debugger' ); ?></p>
+            <p>
+                <a href="<?php echo esc_url( $scan_url ); ?>" class="button button-primary">
+                    <?php esc_html_e( 'Run Self-Test Scan', 'kiss-woo-shipping-debugger' ); ?>
+                </a>
+            </p>
+            <h3><?php esc_html_e( 'What to Expect', 'kiss-woo-shipping-debugger' ); ?></h3>
+            <p><?php esc_html_e( 'After running the scan, you should see a report detailing various rules found within the `self-test.php` file, such as:', 'kiss-woo-shipping-debugger' ); ?></p>
+            <ul>
+                <li><?php esc_html_e( 'Checkout rules that block shipping to certain states.', 'kiss-woo-shipping-debugger' ); ?></li>
+                <li><?php esc_html_e( 'Code that adds or removes shipping rates.', 'kiss-woo-shipping-debugger' ); ?></li>
+                <li><?php esc_html_e( 'Logic that adds a handling fee to the cart.', 'kiss-woo-shipping-debugger' ); ?></li>
+            </ul>
+            <p><?php esc_html_e( 'If you see these results, the scanner is working correctly. If the report is empty, there might be an issue with file permissions or the PHP Parser setup.', 'kiss-woo-shipping-debugger' ); ?></p>
+        </div>
+        <?php
+    }
+
 
     /**
      * Stream a CSV export of configured WooCommerce shipping settings.
@@ -250,7 +299,7 @@ class KISS_WSE_Debugger {
         // Filter UI
         $filters_url = add_query_arg( [
             'page' => $this->page_slug,
-        ], admin_url( 'tools.php' ) );
+        ], admin_url( 'admin.php' ) );
 
         echo '<h3>' . esc_html__( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ) . '</h3>';
         echo '<form method="get" style="margin:0 0 12px 0;">';
@@ -562,7 +611,6 @@ class KISS_WSE_Debugger {
         return add_query_arg( [
             'page'    => 'wc-settings',
             'tab'     => 'shipping',
-            'section' => 'shipping_zones',
             'zone_id' => $zone_id,
         ], admin_url( 'admin.php' ) );
     }
@@ -571,10 +619,7 @@ class KISS_WSE_Debugger {
         return add_query_arg( [
             'page'        => 'wc-settings',
             'tab'         => 'shipping',
-            'section'     => 'shipping_zones',
-            'zone_id'     => $zone_id,
             'instance_id' => $instance_id,
         ], admin_url( 'admin.php' ) );
     }
-
 }
