@@ -32,6 +32,8 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
     private array $newRateNodes    = [];
     /** @var Node[] */
     private array $addFeeNodes     = [];
+    /** @var Node[] */
+    private array $checkoutProcessHookNodes = [];
 
     public function enterNode(Node $node) {
         // 1) $package->add_rate(...)
@@ -99,6 +101,17 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
         ) {
             $this->addFeeNodes[] = $node;
         }
+        
+        // 8) add_action('woocommerce_checkout_process', ...) or add_action('woocommerce_after_checkout_validation', ...)
+        if ($node instanceof FuncCall
+            && $node->name instanceof Name
+            && $node->name->toString() === 'add_action'
+            && isset($node->args[0])
+            && $node->args[0]->value instanceof String_
+            && in_array($node->args[0]->value->value, ['woocommerce_checkout_process', 'woocommerce_after_checkout_validation'])
+        ) {
+            $this->checkoutProcessHookNodes[] = $node;
+        }
     }
 
     public function getAddRateNodes(): array    { return $this->addRateNodes; }
@@ -108,4 +121,5 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
     public function getUnsetRateNodes(): array  { return $this->unsetRateNodes; }
     public function getNewRateNodes(): array    { return $this->newRateNodes; }
     public function getAddFeeNodes(): array     { return $this->addFeeNodes; }
+    public function getCheckoutProcessHookNodes(): array { return $this->checkoutProcessHookNodes; }
 }
