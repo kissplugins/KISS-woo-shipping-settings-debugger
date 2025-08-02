@@ -100,38 +100,48 @@ trait KISS_WSE_Testable {
         ob_start();
 
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
+        require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
+
         $code   = file_get_contents( $file_path );
         $parser = $this->create_parser();
 
-        $ast       = $parser->parse( $code );
-        $trav      = new \PhpParser\NodeTraverser();
+        $ast    = $parser->parse( $code );
+        $trav   = new \PhpParser\NodeTraverser();
+        
+        // The visitor chain MUST match the main scanner for tests to be accurate.
         $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-        $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
-        $trav->addVisitor( $visitor );
+        $array_collector = new \KISSShippingDebugger\ArrayCollectorVisitor();
+        $trav->addVisitor( $array_collector );
+        $rate_visitor = new \KISSShippingDebugger\RateAddCallVisitor();
+        $trav->addVisitor( $rate_visitor );
         $trav->traverse( $ast );
 
+        // Build the data structures needed by the describe_node function.
+        $collected_arrays = [ $file_path => $array_collector->getArraysByScope() ];
+        
         $sections = [
-            'unsetRates'  => $visitor->getUnsetRateNodes(),
-            'addFees'     => $visitor->getAddFeeNodes(),
-            'newRates'    => $visitor->getNewRateNodes(),
+            'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+            'addFees'     => $rate_visitor->getAddFeeNodes(),
+            'newRates'    => $rate_visitor->getNewRateNodes(),
+            'errors'      => $rate_visitor->getErrorAddNodes(),
         ];
 
-        $titles = [
-            'unsetRates'  => __('unset($rates[])', 'kiss-woo-shipping-debugger'),
-            'addFees'     => __('add_fee() Calls', 'kiss-woo-shipping-debugger'),
-            'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
-        ];
-
-        foreach ( $titles as $key => $title ) {
-            if ( ! empty( $sections[ $key ] ) ) {
-                printf( '<h4>%s</h4><ul>', esc_html( $title ) );
-                foreach ( $sections[ $key ] as $node ) {
-                    $desc = $this->describe_node( $key, $node );
-                    // Use wp_kses_post to allow code> tags in test output
-                    printf( '<li>%s</li>', wp_kses_post( $desc ) );
-                }
-                echo '</ul>';
+        $all_findings = [];
+        foreach($sections as $key => $nodes) {
+            foreach($nodes as $node) {
+                $all_findings[] = ['file' => $file_path, 'key' => $key, 'node' => $node];
             }
+        }
+        
+        // Render the findings using the full-featured describe_node method.
+        if ( ! empty( $all_findings ) ) {
+            echo '<ul>';
+            foreach ( $all_findings as $finding ) {
+                $desc = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
+                // Use wp_kses_post to allow tags in test output
+                printf( '<li>%s</li>', wp_kses_post( $desc ) );
+            }
+            echo '</ul>';
         }
         
         return ob_get_clean();
