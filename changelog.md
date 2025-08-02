@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2.0.0
+* **Fix:** Resolved a fatal error caused by incorrect file paths for `require_once`. The necessary helper classes (`RateAddCallVisitor`, `FunctionVisitor`, `HookedFunction`) are now included directly within the main plugin file, removing the need for a separate `lib` directory and ensuring stability.
+* **Maintenance:** Version bumped to 2.0.0 to signify a major update.
+
+## 1.1.1
+* **UX:** The 'Additional Theme File' input for the scanner is now saved to the database. Its value persists between page loads, so you don't have to re-enter it.
+
+## 1.1.0
 * **Major Refactor:** The scanner logic has been completely refactored to be function-aware.
   * Instead of a flat list of findings, the analysis is now grouped by the specific function hooked into WooCommerce. This provides a much clearer, more contextual narrative of what each piece of code does.
   * Implemented a two-pass analysis: the first pass finds all `add_action`/`add_filter` calls to identify hooked functions, and the second pass analyzes the contents of each of those functions.
