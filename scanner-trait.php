@@ -100,11 +100,9 @@ trait KISS_WSE_Scanner {
             echo '<ul>';
             foreach ( $findings as $finding ) {
                 $line = (int) $finding['node']->getLine();
-                // ADDED: Get the base filename from the full path.
                 $filename = basename( $finding['file'] );
                 $desc = $this->describe_node( $finding['key'], $finding['node'] ); // Get formatted description
                 
-                // CHANGED: The final sprintf now includes the filename.
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
@@ -151,6 +149,13 @@ trait KISS_WSE_Scanner {
         // 2. Bold product names (one or two words) before "products"
         $message = preg_replace(
             '/(\b[\w-]+(?:\s[\w-]+)?)\s+(products)\b/i',
+            '<strong>$1</strong> $2',
+            $message
+        );
+        
+        // ADDED: Handle product names that appear before "or"
+        $message = preg_replace(
+            '/(\b[\w-]+(?:\s[\w-]+)?)\s+(or)\b/i',
             '<strong>$1</strong> $2',
             $message
         );
