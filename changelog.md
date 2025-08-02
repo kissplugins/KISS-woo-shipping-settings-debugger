@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2
+Cover multiple Product bolding via new Regex functions
+Self Test stable now
+
 ## 2.3.1
 * **Fix:** Corrected a regression where the scanner would only scan the default file OR the additional file, but not both. It now correctly scans the default `inc/shipping-restrictions.php` file first, and then scans the user-provided additional file.
 * **UX:** Clarified the instructional text for the "Scan Additional File" input field to be more precise about the expected path.
@@ -16,12 +20,6 @@
   * The scanner now describes the conditions (`if` statements) that trigger each rule, providing crucial context. For example, it will now say a rule runs "when the state is 'CA'".
   * Placeholders for dynamic content in error messages are now simplified (e.g., `{restricted_states[{state}]}` is now displayed as `[state name]`), making the output cleaner and more intuitive.
   * Added specific parsing for `has_term()` and `isset()` to produce more descriptive condition summaries.
-
-## 2.1.0
-* **Major Refactor:** The Custom Rules Scanner has been re-architected to be more powerful and accurate. Instead of searching for specific hooks, it now scans the entire file for any shipping-related function calls (e.g., `$errors->add`, `unset($rates[...])`) and groups the results by the function they appear in. This allows it to find custom logic even if the corresponding `add_action` or `add_filter` call is in a different file.
-
-## 2.0.0
-* **Major Enhancement:** The Custom Rules Scanner now detects checkout validation hooks (`woocommerce_checkout_process` and `woocommerce_after_checkout_validation`) to identify shipping restrictions implemented via `$errors->add()`. This allows the scanner to find rules that block checkout based on cart contents or shipping address, providing a more complete picture of all shipping-related logic.
 
 ## 1.0.11
 * **Enhancement:** The Custom Rules Scanner now groups results by each hooked callback function, analyzing shipping logic inside individual functions.
