@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.8
+* **Enhancement:** Remembers the optional additional file to scan by saving it in the database.
+
 ## 1.0.7
 * **Fix:** Eliminated "Undefined array key zone_id" by iterating zone IDs (and explicitly adding zone ID 0 for Rest of World).
 * **UX:** Price outputs in the Zones & Methods preview now render as clean text (no Woo price HTML).

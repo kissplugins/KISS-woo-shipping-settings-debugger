@@ -3,7 +3,7 @@ Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple  
 Requires at least: 6.0  
 Tested up to: 6.8  
-Stable tag: 1.0.7  
+Stable tag: 1.0.8
 Requires PHP: 7.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -190,8 +190,9 @@ To keep the admin fast and responsive on stores with many zones/methods. The CSV
 
 See `changelog.md` for detailed version history. Highlights:
 
-- **1.0.7** – Fixed zone warning; cleaner price text; refined method details.  
-- **1.0.6** – Restored Zones & Methods Preview with filters, warnings, and deep links.  
+- **1.0.8** – Remembers the additional theme file to scan for custom rules.
+- **1.0.7** – Fixed zone warning; cleaner price text; refined method details.
+- **1.0.6** – Restored Zones & Methods Preview with filters, warnings, and deep links.
 - **1.0.5+** – Improved human-readable AST summaries; security hardening; realpath clamping; parser self-test.
 
 ---
