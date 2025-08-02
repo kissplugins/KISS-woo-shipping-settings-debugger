@@ -234,7 +234,30 @@ trait KISS_WSE_Scanner {
                     return $summary;
 
                 case 'addFees':
-                    return __( 'Calls add_fee() to adjust cart totals.', 'kiss-woo-shipping-debugger' );
+                    // add_fee( name, amount, ... )
+                    $parts = [];
+                    if ( property_exists( $node, 'args' ) ) {
+                        $label  = isset( $node->args[0] ) ? $this->extract_string_or_placeholder( $node->args[0]->value ) : '';
+
+                        // If amount is a variable, try to describe its assignment (e.g., from a match expression)
+                        if ( isset( $node->args[1] ) && $node->args[1]->value instanceof \PhpParser\Node\Expr\Variable ) {
+                            $amount = $this->describe_variable_assignment( $node->args[1]->value );
+                        } else {
+                            $amount = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value ) : '';
+                        }
+
+                        if ( $label !== '' )  { $parts[] = sprintf( __( 'label “%s”', 'kiss-woo-shipping-debugger' ), $label ); }
+                        if ( $amount !== '' ) { $parts[] = sprintf( __( 'amount %s', 'kiss-woo-shipping-debugger' ), $amount ); }
+                    }
+                    $when    = $this->condition_chain_text( $node );
+                    $summary = __( 'Adds a fee to the cart.', 'kiss-woo-shipping-debugger' );
+                    if ( ! empty( $parts ) ) {
+                        $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
             }
 
             return '';
@@ -245,11 +268,11 @@ trait KISS_WSE_Scanner {
 
     /**
      * Extract a string from an expression. Handles:
-     *  - direct strings
-     *  - interpolated strings
-     *  - concatenation
-     *  - translation wrappers: __("..."), esc_html__(), etc.
-     *  - sprintf("fmt %s", $x) -> "fmt {x}"
+     * - direct strings
+     * - interpolated strings
+     * - concatenation
+     * - translation wrappers: __("..."), esc_html__(), etc.
+     * - sprintf("fmt %s", $x) -> "fmt {x}"
      * For non-literals, we render placeholders like {var}, {func()}, {obj->prop}, {arr[key]}.
      */
     private function extract_string( $expr ): string {
@@ -505,6 +528,47 @@ trait KISS_WSE_Scanner {
         // De-duplicate simple repeats
         $conds = array_values( array_unique( array_filter( $conds ) ) );
         return implode( ' ' . __( 'and', 'kiss-woo-shipping-debugger' ) . ' ', $conds );
+    }
+
+    /**
+     * Finds the assignment for a variable and returns a human-readable description of it.
+     * Special-cased for match expressions.
+     */
+    private function describe_variable_assignment( \PhpParser\Node\Expr\Variable $var ): string {
+        try {
+            $varName = is_string( $var->name ) ? $var->name : null;
+            if ( ! $varName ) {
+                return $this->expr_placeholder( $var );
+            }
+
+            // Find nearest function-like ancestor to limit scope
+            $scope = null;
+            $cur   = $var;
+            while ( $cur = $cur->getAttribute( 'parent' ) ) {
+                if ( $cur instanceof \PhpParser\Node\FunctionLike ) {
+                    $scope = $cur;
+                    break;
+                }
+                if ( ! $cur instanceof \PhpParser\Node ) break;
+            }
+            if ( ! $scope ) return $this->expr_placeholder( $var );
+
+            // Find the last assignment to this variable before its use
+            $finder  = new \PhpParser\NodeFinder();
+            /** @var \PhpParser\Node\Expr\Assign[] $assigns */
+            $assigns = array_filter(
+                $finder->findInstanceOf( $scope, \PhpParser\Node\Expr\Assign::class ),
+                fn( $a ) => ( $a->var instanceof \PhpParser\Node\Expr\Variable && $a->var->name === $varName && $a->getLine() < $var->getLine() )
+            );
+
+            if ( empty( $assigns ) ) return $this->expr_placeholder( $var );
+            $lastAssign = end( $assigns );
+
+            if ( $lastAssign->expr instanceof \PhpParser\Node\Expr\Match_ ) {
+                return __( 'is determined by conditional logic (a match statement)', 'kiss-woo-shipping-debugger' );
+            }
+        } catch ( \Throwable $e ) {} // Fall through on error
+        return $this->expr_placeholder( $var );
     }
 
     /**

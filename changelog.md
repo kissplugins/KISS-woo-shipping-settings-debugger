@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.9
+* **Enhancement:** The scanner's description for `add_fee()` calls is now more abstract and human-readable. Instead of showing variable placeholders like `{surcharge}`, it now describes the conditional logic (e.g., from a `match` statement) that determines the fee amount, providing a clearer explanation of the rule.
+
+## 1.0.8
+* **Enhancement:** The Custom Rules Scanner now provides rich, human-readable analysis for `add_fee()` calls. It extracts the fee's name, its value (even if variable), and the parent conditions, making the output far more descriptive and abstract.
+
 ## 1.0.7
 * **Fix:** Eliminated "Undefined array key zone_id" by iterating zone IDs (and explicitly adding zone ID 0 for Rest of World).
 * **UX:** Price outputs in the Zones & Methods preview now render as clean text (no Woo price HTML).
