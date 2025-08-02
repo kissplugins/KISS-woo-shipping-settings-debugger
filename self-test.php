@@ -23,10 +23,11 @@ if ( ! defined( 'WPINC' ) ) {
  * Adds the "Self Test" link to the plugin's Tools page menu.
  */
 function kiss_wse_add_self_test_submenu_page() {
+    // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
     add_submenu_page(
-        'tools.php',
-        'KISS Shipping Self-Test',
-        'KISS Shipping Self-Test',
+        'woocommerce',
+        'Shipping Debugger Self-Test',
+        'Shipping Self-Test',
         'manage_woocommerce',
         'kiss-wse-self-test',
         'kiss_wse_self_test_page_html'
@@ -241,7 +242,6 @@ PHP;
 
                 $output = $main_class->scan_single_file_for_test($test_file_path);
 
-                // CHANGED: The assertion now expects the <code> tag in the output.
                 $checks = [
                     "Removes a shipping rate by key (<code>flat_rate:1</code>)",
                     "label “Test Surcharge”, amount 10.5",

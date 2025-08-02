@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     1.0.14
+ * Version:     1.0.15
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -203,7 +203,7 @@ class KISS_WSE_Debugger {
      * Add a convenient settings link on the plugins page.
      */
     public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'tools.php?page=' . $this->page_slug ) );
+        $url  = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
         $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
         array_unshift( $links, "<a href=\"$url\">$text</a>" );
         return $links;
@@ -213,9 +213,11 @@ class KISS_WSE_Debugger {
      * Register the Tools submenu page for the debugger UI.
      */
     public function register_menu(): void {
-        add_management_page(
+        // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
+        add_submenu_page(
+            'woocommerce',
             __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'KISS Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
             'manage_woocommerce',
             $this->page_slug,
             [ $this, 'render_page' ]
@@ -295,7 +297,6 @@ class KISS_WSE_Debugger {
             esc_html( get_stylesheet_directory() ),
             esc_attr( $additional ),
             esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
-            // CHANGED: Updated the helper text to be accurate.
             esc_html__( 'Path is relative to the active theme’s root directory (e.g., "woo-functions.php" or "inc/extra.php").', 'kiss-woo-shipping-debugger' )
         );
 
@@ -380,7 +381,7 @@ class KISS_WSE_Debugger {
         // Filter UI
         $filters_url = add_query_arg( [
             'page' => $this->page_slug,
-        ], admin_url( 'tools.php' ) );
+        ], admin_url( 'admin.php' ) );
 
         echo '<h3>' . esc_html__( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ) . '</h3>';
         echo '<form method="get" style="margin:0 0 12px 0;">';
