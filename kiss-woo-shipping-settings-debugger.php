@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     2.1.0
+ * Version:     1.0.15
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -14,6 +14,8 @@ define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 
 require_once __DIR__ . '/preview-trait.php';
 require_once __DIR__ . '/scanner-trait.php';
+require_once __DIR__ . '/self-test.php';
+
 
 add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
 /**
@@ -33,11 +35,138 @@ function kiss_wse_initialize_debugger(): void {
 }
 
 /**
+ * Contains helper methods for testing without affecting production code.
+ * This trait is defined here to avoid redeclaration errors.
+ */
+trait KISS_WSE_Testable {
+    public function collect_zone_rows_from_data( array $mock_zones, int $cap = 100 ): array {
+        $rows = [];
+        $warnings = [];
+        $total_rows = 0;
+
+        foreach ($mock_zones as $zone) {
+            $zone_name = $zone->get_zone_name();
+            // Since this is a mock test, we don't need the full HTML rendering of locations
+            // $locations_html = $this->format_zone_locations($zone, 6);
+            $methods = $zone->get_shipping_methods();
+            
+            $enabled = 0; $disabled = 0;
+            foreach ($methods as $m) {
+                if ('yes' === $m->enabled) $enabled++; else $disabled++;
+            }
+
+            $zone_issues = [];
+            if ($enabled === 0) {
+                $zone_issues[] = __( 'Zone has no enabled shipping methods.', 'kiss-woo-shipping-debugger' );
+            }
+            foreach ($methods as $m) {
+                if ($m->id === 'free_shipping' && 'yes' === $m->enabled) {
+                    $requires = (string)$m->get_option('requires', '');
+                    if ($requires === '' || $requires === 'no') {
+                        $zone_issues[] = __( 'Free Shipping has no requirement (no minimum and no coupon).', 'kiss-woo-shipping-debugger' );
+                        break;
+                    }
+                }
+            }
+
+            if (!empty($zone_issues)) {
+                $warnings[] = sprintf('<strong>%s</strong>: %s', esc_html($zone_name), esc_html(implode('; ', $zone_issues)));
+            }
+            
+            $total_rows++;
+            if ($total_rows >= $cap) break;
+        }
+
+        $warnings_html = '';
+        if (!empty($warnings)) {
+            $warnings_html = '⚠️ ' . implode('<br>⚠️ ', $warnings);
+        }
+
+        return [ [], $total_rows, $warnings_html ];
+    }
+
+    /**
+     * A dedicated scanner for the self-test suite.
+     * This scans only one file and returns the output as a string, ensuring the test is isolated.
+     */
+    public function scan_single_file_for_test( string $file_path ): string {
+        if ( ! file_exists( $file_path ) ) {
+            return 'Test Error: File not found at ' . esc_html($file_path);
+        }
+        if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+            return 'Test Error: PHP-Parser not available.';
+        }
+
+        ob_start();
+
+        require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
+        $code   = file_get_contents( $file_path );
+        $parser = $this->create_parser();
+
+        $ast       = $parser->parse( $code );
+        $trav      = new \PhpParser\NodeTraverser();
+        $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
+        $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
+        $trav->addVisitor( $visitor );
+        $trav->traverse( $ast );
+
+        $sections = [
+            'unsetRates'  => $visitor->getUnsetRateNodes(),
+            'addFees'     => $visitor->getAddFeeNodes(),
+            'newRates'    => $visitor->getNewRateNodes(),
+        ];
+
+        $titles = [
+            'unsetRates'  => __('unset($rates[])', 'kiss-woo-shipping-debugger'),
+            'addFees'     => __('add_fee() Calls', 'kiss-woo-shipping-debugger'),
+            'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
+        ];
+
+        foreach ( $titles as $key => $title ) {
+            if ( ! empty( $sections[ $key ] ) ) {
+                printf( '<h4>%s</h4><ul>', esc_html( $title ) );
+                foreach ( $sections[ $key ] as $node ) {
+                    $desc = $this->describe_node( $key, $node );
+                    // Use wp_kses_post to allow <code> tags in test output
+                    printf( '<li>%s</li>', wp_kses_post( $desc ) );
+                }
+                echo '</ul>';
+            }
+        }
+        
+        return ob_get_clean();
+    }
+}
+
+/**
  * Main controller for the Shipping Settings Debugger.
  */
 class KISS_WSE_Debugger {
     private string $page_slug = 'kiss-wse-export';
-    use KISS_WSE_Preview, KISS_WSE_Scanner;
+
+    use KISS_WSE_Preview, KISS_WSE_Testable;
+
+    use KISS_WSE_Scanner {
+        scan_and_render_custom_rules as public;
+        create_parser as public;
+        short_explanation_label as public;
+        describe_node as public;
+        extract_string as public;
+        extract_string_or_placeholder as public;
+        expr_placeholder as public;
+        describe_callback as public;
+        extract_unset_rate_key as public;
+        string_or_resolved_variable as public;
+        resolve_variable_value as public;
+        condition_chain_text as public;
+        describe_variable_assignment as public;
+        cond_to_text as public;
+        is_false_const as public;
+        is_var_named as public;
+        is_number_like as public;
+        simple_expr_text as public;
+        condition_mentions_free_shipping as public;
+    }
 
     /**
      * Constructor. Hooks into WordPress admin and ensures PHP-Parser is loaded.
@@ -50,6 +179,7 @@ class KISS_WSE_Debugger {
 
         add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
         add_action( 'admin_menu', [ $this, 'register_menu' ] );
+        add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
         add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
     }
 
@@ -73,7 +203,7 @@ class KISS_WSE_Debugger {
      * Add a convenient settings link on the plugins page.
      */
     public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'tools.php?page=' . $this->page_slug ) );
+        $url  = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
         $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
         array_unshift( $links, "<a href=\"$url\">$text</a>" );
         return $links;
@@ -83,9 +213,11 @@ class KISS_WSE_Debugger {
      * Register the Tools submenu page for the debugger UI.
      */
     public function register_menu(): void {
-        add_management_page(
+        // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
+        add_submenu_page(
+            'woocommerce',
             __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'KISS Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
             'manage_woocommerce',
             $this->page_slug,
             [ $this, 'render_page' ]
@@ -154,8 +286,8 @@ class KISS_WSE_Debugger {
                 <input type="hidden" name="page" value="%1$s">
                 <p>
                   <label><strong>%2$s</strong></label><br>
-                  <span style="font-family:monospace;">%3$s/inc</span>
-                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="extra.php" value="%4$s">
+                  <span style="font-family:monospace;">%3$s</span>
+                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="inc/woo-functions.php" value="%4$s">
                   <br><em>%6$s</em>
                 </p>
                 <p><button type="submit" class="button">%5$s</button></p>
@@ -165,7 +297,7 @@ class KISS_WSE_Debugger {
             esc_html( get_stylesheet_directory() ),
             esc_attr( $additional ),
             esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
-            esc_html__( 'Path is restricted to the active child theme’s /inc/ directory (e.g., "extra.php" or "subdir/custom.php").', 'kiss-woo-shipping-debugger' )
+            esc_html__( 'Path is relative to the active theme’s root directory (e.g., "woo-functions.php" or "inc/extra.php").', 'kiss-woo-shipping-debugger' )
         );
 
         try {
@@ -236,8 +368,7 @@ class KISS_WSE_Debugger {
         exit;
     }
 
-
-    private function render_preview_table(): void {
+    public function render_preview_table(): void {
         if ( ! class_exists( 'WC_Shipping_Zones' ) ) {
             echo '<p><em>' . esc_html__( 'WooCommerce shipping is not available.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
             return;
@@ -250,7 +381,7 @@ class KISS_WSE_Debugger {
         // Filter UI
         $filters_url = add_query_arg( [
             'page' => $this->page_slug,
-        ], admin_url( 'tools.php' ) );
+        ], admin_url( 'admin.php' ) );
 
         echo '<h3>' . esc_html__( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ) . '</h3>';
         echo '<form method="get" style="margin:0 0 12px 0;">';
@@ -308,12 +439,7 @@ class KISS_WSE_Debugger {
         }
     }
 
-    /**
-     * Assemble zone rows for preview table and aggregate warnings.
-     *
-     * @return array{0: array<int,array{string,string,string,string}>, 1:int, 2:string} rows, total_rows, warnings_html
-     */
-    private function collect_zone_rows( bool $issues_only, bool $methods_enabled_only, int $cap ): array {
+    public function collect_zone_rows( bool $issues_only, bool $methods_enabled_only, int $cap ): array {
         $rows = [];
         $warnings = [];
 
@@ -446,10 +572,7 @@ class KISS_WSE_Debugger {
         return [ $rows, $total_rows, $warnings_html ];
     }
 
-    /**
-     * Format zone locations concisely, with a display cap.
-     */
-    private function format_zone_locations( \WC_Shipping_Zone $zone, int $display_cap = 6 ): string {
+    public function format_zone_locations( \WC_Shipping_Zone $zone, int $display_cap = 6 ): string {
         $locations = $zone->get_zone_locations();
 
         if ( empty( $locations ) ) {
@@ -493,10 +616,7 @@ class KISS_WSE_Debugger {
         return $label;
     }
 
-    /**
-     * Summarize a shipping method with useful details.
-     */
-    private function summarize_method( $method ): string {
+    public function summarize_method( $method ): string {
         $title = isset( $method->title ) ? (string) $method->title : ( isset( $method->method_title ) ? (string) $method->method_title : (string) $method->id );
         $id    = (string) ( $method->id ?? '' );
 
@@ -543,10 +663,7 @@ class KISS_WSE_Debugger {
         return $line;
     }
 
-    /**
-     * Convert a numeric amount to a clean text price (no HTML), preferring wc_price formatting.
-     */
-    private function price_to_text( float $amount ): string {
+    public function price_to_text( float $amount ): string {
         if ( function_exists( 'wc_price' ) ) {
             // wc_price returns HTML; strip tags to plain text for table cells
             return trim( wp_strip_all_tags( wc_price( $amount ) ) );
@@ -558,7 +675,7 @@ class KISS_WSE_Debugger {
         return '$' . number_format( $amount, 2 );
     }
 
-    private function zone_edit_link( int $zone_id ): string {
+    public function zone_edit_link( int $zone_id ): string {
         return add_query_arg( [
             'page'    => 'wc-settings',
             'tab'     => 'shipping',
@@ -567,7 +684,7 @@ class KISS_WSE_Debugger {
         ], admin_url( 'admin.php' ) );
     }
 
-    private function method_edit_link( int $zone_id, int $instance_id ): string {
+    public function method_edit_link( int $zone_id, int $instance_id ): string {
         return add_query_arg( [
             'page'        => 'wc-settings',
             'tab'         => 'shipping',
@@ -576,5 +693,4 @@ class KISS_WSE_Debugger {
             'instance_id' => $instance_id,
         ], admin_url( 'admin.php' ) );
     }
-
 }

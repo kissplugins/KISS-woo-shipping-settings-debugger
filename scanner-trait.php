@@ -5,147 +5,115 @@
 trait KISS_WSE_Scanner {
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
-
-        // Always scan the canonical file within /inc/
-        $files = [];
+    
+        // --- 1. GATHER FILES ---
+        $files_to_scan = [];
         $default_file = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc/shipping-restrictions.php' );
-        $files[] = $default_file;
-
-        // Restrict any "additional" file to the child theme /inc/ directory
-        $base_inc  = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc' );
-        $base_real = realpath( $base_inc );
-
+        if ( file_exists($default_file) ) {
+            $files_to_scan[] = $default_file;
+        }
+    
+        $base_dir  = wp_normalize_path( get_stylesheet_directory() );
+        $base_real = realpath( $base_dir );
+    
         if ( $additional && $base_real ) {
-            $rel   = ltrim( wp_normalize_path( $additional ), '/\\' ); // user may enter "extra.php" or "subdir/file.php"
+            $rel   = ltrim( wp_normalize_path( $additional ), '/\\' );
             $try   = wp_normalize_path( $base_real . DIRECTORY_SEPARATOR . $rel );
             $real  = realpath( $try );
-
-            // Verify $real exists and is under $base_real
-            if ( $real ) {
+    
+            if ( $real && is_file($real) ) {
                 $real_norm = wp_normalize_path( $real );
                 $base_norm = wp_normalize_path( $base_real );
-                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && is_file( $real ) ) {
-                    $files[] = $real;
-                } else {
-                    echo '<div class="notice notice-warning"><p>' .
-                         esc_html__( 'Invalid file path. The additional file must be inside the active child theme’s /inc/ directory.', 'kiss-woo-shipping-debugger' ) .
-                         '</p></div>';
+                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && !in_array($real, $files_to_scan) ) {
+                    $files_to_scan[] = $real;
                 }
             } else {
-                echo '<div class="notice notice-warning"><p>' .
-                     esc_html__( 'Additional file not found within /inc/. Please check the filename.', 'kiss-woo-shipping-debugger' ) .
-                     '</p></div>';
+                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
             }
         }
-
-        foreach ( $files as $file ) {
-            printf( '<h3>Scanning <code>%s</code></h3>', esc_html( wp_make_link_relative( $file ) ) );
-            if ( ! file_exists( $file ) ) {
-                echo '<p><em>' . esc_html__( 'File not found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
-                continue;
-            }
+    
+        // --- 2. COLLECT ALL FINDINGS FROM ALL FILES ---
+        $all_findings = [];
+        foreach ( $files_to_scan as $file ) {
+            echo '<h3>Scanning <code>' . esc_html( wp_make_link_relative( $file ) ) . '</code></h3>';
 
             if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
-                echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan file:', 'kiss-woo-shipping-debugger' ) . ' ' . esc_html(wp_make_link_relative($file)) . '</em></p>';
                 continue;
             }
-
+    
             $code   = file_get_contents( $file );
             $parser = $this->create_parser();
             $ast    = $parser->parse( $code );
-
-            // Traverse the entire AST to find all relevant nodes at once.
-            $trav = new \PhpParser\NodeTraverser();
+            $trav   = new \PhpParser\NodeTraverser();
             $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
             $visitor = new \KISSShippingDebugger\RateAddCallVisitor();
             $trav->addVisitor( $visitor );
             $trav->traverse( $ast );
-
-            // Group all found nodes by their parent function.
-            $all_nodes = [
-                'rateCalls'  => $visitor->getAddRateNodes(),
-                'newRates'   => $visitor->getNewRateNodes(),
-                'unsetRates' => $visitor->getUnsetRateNodes(),
-                'addFees'    => $visitor->getAddFeeNodes(),
-                'errors'     => $visitor->getErrorAddNodes(),
+    
+            $sections = [
+                'errors'      => $visitor->getErrorAddNodes(),
+                'unsetRates'  => $visitor->getUnsetRateNodes(),
+                'filterHooks' => $visitor->getFilterHookNodes(),
+                'feeHooks'    => $visitor->getFeeHookNodes(),
+                'rateCalls'   => $visitor->getAddRateNodes(),
+                'newRates'    => $visitor->getNewRateNodes(),
+                'addFees'     => $visitor->getAddFeeNodes(),
             ];
-
-            $grouped_by_function = [];
-            foreach ( $all_nodes as $key => $nodes ) {
-                foreach ( $nodes as $node ) {
-                    $func_name = $this->get_parent_function_name( $node );
-                    if ( ! isset( $grouped_by_function[ $func_name ] ) ) {
-                        $grouped_by_function[ $func_name ] = [];
-                    }
-                    $grouped_by_function[ $func_name ][] = [ 'type' => $key, 'node' => $node ];
+    
+            foreach($sections as $key => $nodes) {
+                foreach($nodes as $node) {
+                    $all_findings[] = [
+                        'file' => $file,
+                        'key'  => $key,
+                        'node' => $node,
+                    ];
                 }
             }
-
-            if ( empty( $grouped_by_function ) ) {
-                echo '<p><em>' . esc_html__( 'No shipping-related logic found in this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
-                continue;
-            }
-
-            // Render the results, grouped by function.
-            foreach ( $grouped_by_function as $func_name => $items ) {
-                printf( '<h4>%s <code>%s</code></h4>', esc_html__( 'Function:', 'kiss-woo-shipping-debugger' ), esc_html( $func_name ) );
-                echo '<ul>';
-                foreach ( $items as $item ) {
-                    $line = (int) $item['node']->getLine();
-                    $desc = $this->describe_node( $item['type'], $item['node'] );
-                    printf(
-                        '<li><strong>%s</strong> — %s %s</li>',
-                        esc_html( $this->short_explanation_label( $item['type'] ) ),
-                        esc_html( $desc ),
-                        sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
-                    );
+        }
+    
+        // --- 3. GROUP FINDINGS BY PRODUCT KEYWORD ---
+        $grouped_rules = [];
+        $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
+    
+        foreach ( $all_findings as $finding ) {
+            $description = $this->describe_node( $finding['key'], $finding['node'], true ); // Get raw description
+            $found_keyword = 'OTHER RULES'; // Default group
+    
+            foreach ( $product_keywords as $keyword ) {
+                if ( stripos( $description, $keyword ) !== false ) {
+                    $found_keyword = strtoupper($keyword);
+                    break;
                 }
-                echo '</ul>';
             }
+            $grouped_rules[$found_keyword][] = $finding;
+        }
+
+        // --- 4. RENDER THE GROUPED OUTPUT ---
+        if ( empty($grouped_rules) ) {
+            echo '<p><em>' . esc_html__( 'No shipping-related rules found in the scanned files.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+            return;
+        }
+    
+        foreach ( $grouped_rules as $product => $findings ) {
+            printf( '<h4><strong>%s</strong></h4>', esc_html( $product ) );
+            echo '<ul>';
+            foreach ( $findings as $finding ) {
+                $line = (int) $finding['node']->getLine();
+                $filename = basename( $finding['file'] );
+                $desc = $this->describe_node( $finding['key'], $finding['node'] ); // Get formatted description
+                
+                printf(
+                    '<li><strong>%s</strong> — %s %s</li>',
+                    esc_html( $this->short_explanation_label( $finding['key'] ) ),
+                    wp_kses_post( $desc ),
+                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                );
+            }
+            echo '</ul>';
         }
     }
 
-    /**
-     * Get the name of the parent function for a given AST node.
-     */
-    private function get_parent_function_name( \PhpParser\Node $node ): string {
-        $current = $node;
-        while ( $current = $current->getAttribute( 'parent' ) ) {
-            if ( $current instanceof \PhpParser\Node\FunctionLike ) {
-                if ( $current instanceof \PhpParser\Node\Stmt\Function_ && $current->name instanceof \PhpParser\Node\Identifier ) {
-                    return $current->name->toString() . '()';
-                }
-                if ( $current instanceof \PhpParser\Node\Expr\Closure ) {
-                    return __( 'anonymous function', 'kiss-woo-shipping-debugger' );
-                }
-                if ( $current instanceof \PhpParser\Node\Stmt\ClassMethod && $current->name instanceof \PhpParser\Node\Identifier) {
-                    $className = $this->get_parent_class_name($current);
-                    return $className . '::' . $current->name->toString() . '()';
-                }
-            }
-             if ( ! $current instanceof \PhpParser\Node ) break;
-        }
-        return __( 'global scope', 'kiss-woo-shipping-debugger' );
-    }
-
-     /**
-     * Get the name of the parent class for a given AST node.
-     */
-    private function get_parent_class_name( \PhpParser\Node $node ): string {
-        $current = $node;
-        while ( $current = $current->getAttribute( 'parent' ) ) {
-            if ( $current instanceof \PhpParser\Node\Stmt\Class_ ) {
-                return $current->name instanceof \PhpParser\Node\Identifier ? $current->name->toString() : 'class';
-            }
-             if ( ! $current instanceof \PhpParser\Node ) break;
-        }
-        return '';
-    }
-
-    /**
-     * Create and return a PHP-Parser instance using the newest supported version.
-     * Kept as a helper for DRY use across the parser self-test and the scanner.
-     */
     private function create_parser() {
         $factory = new \PhpParser\ParserFactory();
         if ( method_exists( $factory, 'createForNewestSupportedVersion' ) ) {
@@ -154,9 +122,6 @@ trait KISS_WSE_Scanner {
         return $factory->create( \PhpParser\ParserFactory::PREFER_PHP7 );
     }
 
-    /**
-     * Produce a short label used in list items.
-     */
     private function short_explanation_label( string $key ): string {
         switch ( $key ) {
             case 'filterHooks': return __( 'Modifies shipping rates', 'kiss-woo-shipping-debugger' );
@@ -171,32 +136,59 @@ trait KISS_WSE_Scanner {
     }
 
     /**
-     * Return a human-readable explanation for a given node.
-     * Conservative and static: uses simple extraction heuristics, no execution.
-     *
-     * @param string          $key  Section key.
-     * @param \PhpParser\Node $node Matched node.
-     * @return string
+     * Helper function to apply bolding rules to error messages.
      */
-    private function describe_node( string $key, \PhpParser\Node $node ): string {
+    private function format_error_message( string $message ): string {
+        // 1. Bold specific, high-priority keywords
+        $message = str_ireplace(
+            ['Kratom'], // Oregon is handled by the state rule below
+            ['<strong>Kratom</strong>'],
+            $message
+        );
+
+        // 2. Bold product names (one or two words) before "products"
+        $message = preg_replace(
+            '/(\b[\w-]+(?:\s[\w-]+)?)\s+(products)\b/i',
+            '<strong>$1</strong> $2',
+            $message
+        );
+        
+        // ADDED: Handle product names that appear before "or"
+        $message = preg_replace(
+            '/(\b[\w-]+(?:\s[\w-]+)?)\s+(or)\b/i',
+            '<strong>$1</strong> $2',
+            $message
+        );
+
+        // 3. Bold state names that appear after "to" or "for"
+        $states = ['Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'];
+        $states_pattern = implode('|', $states);
+        $message = preg_replace(
+            "/\b(to|for)\s+({$states_pattern})\b/i",
+            '$1 <strong>$2</strong>',
+            $message
+        );
+
+        return $message;
+    }
+
+    private function describe_node( string $key, \PhpParser\Node $node, bool $raw = false ): string {
         try {
             switch ( $key ) {
                 case 'errors':
-                    // $errors->add( key, message, ... )
                     if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
                         $msg = $this->extract_string( $node->args[1]->value );
                         if ( $msg !== '' ) {
+                            $formatted_msg = $raw ? $msg : $this->format_error_message( $msg );
                             return sprintf(
-                                /* translators: checkout validation explanation + message */
                                 __( 'Adds a checkout error message: “%s”. Customers will be blocked until they resolve it.', 'kiss-woo-shipping-debugger' ),
-                                $msg
+                                $formatted_msg
                             );
                         }
                     }
                     return __( 'Adds a checkout error message.', 'kiss-woo-shipping-debugger' );
 
                 case 'filterHooks':
-                    // add_filter('woocommerce_package_rates', callback, ...)
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
                         ? $this->describe_callback( $node->args[1]->value )
                         : '';
@@ -209,7 +201,6 @@ trait KISS_WSE_Scanner {
                     return __( 'Theme code hooks into WooCommerce package rates to change which shipping options appear.', 'kiss-woo-shipping-debugger' );
 
                 case 'feeHooks':
-                    // add_action('woocommerce_cart_calculate_fees', callback, ...)
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
                         ? $this->describe_callback( $node->args[1]->value )
                         : '';
@@ -225,10 +216,8 @@ trait KISS_WSE_Scanner {
                     return __( 'Calls add_rate() to insert a custom shipping option programmatically.', 'kiss-woo-shipping-debugger' );
 
                 case 'newRates':
-                    // new WC_Shipping_Rate(id, label, cost, meta, method_id)
                     $parts = [];
                     if ( property_exists( $node, 'args' ) ) {
-                        // Try to resolve ID from a variable assignment in scope
                         $idExpr = isset( $node->args[0] ) ? $node->args[0]->value : null;
                         $id     = $this->string_or_resolved_variable( $node, $idExpr );
 
@@ -249,7 +238,6 @@ trait KISS_WSE_Scanner {
                     return $summary;
 
                 case 'unsetRates':
-                    // unset($rates['key']) or dynamic
                     $keyStr = $this->extract_unset_rate_key( $node );
                     $when   = $this->condition_chain_text( $node );
                     $summary = '';
@@ -258,7 +246,7 @@ trait KISS_WSE_Scanner {
                     } elseif ( $keyStr !== '' ) {
                         $summary = sprintf(
                             __( 'Removes a shipping rate by key (%s)', 'kiss-woo-shipping-debugger' ),
-                            $keyStr
+                            '<code>' . esc_html($keyStr) . '</code>'
                         );
                     } else {
                         $summary = __( 'Removes one or more shipping rates from the available options', 'kiss-woo-shipping-debugger' );
@@ -269,12 +257,10 @@ trait KISS_WSE_Scanner {
                     return $summary;
 
                 case 'addFees':
-                    // add_fee( name, amount, ... )
                     $parts = [];
                     if ( property_exists( $node, 'args' ) ) {
                         $label  = isset( $node->args[0] ) ? $this->extract_string_or_placeholder( $node->args[0]->value ) : '';
 
-                        // If amount is a variable, try to describe its assignment (e.g., from a match expression)
                         if ( isset( $node->args[1] ) && $node->args[1]->value instanceof \PhpParser\Node\Expr\Variable ) {
                             $amount = $this->describe_variable_assignment( $node->args[1]->value );
                         } else {
@@ -301,22 +287,11 @@ trait KISS_WSE_Scanner {
         }
     }
 
-    /**
-     * Extract a string from an expression. Handles:
-     * - direct strings
-     * - interpolated strings
-     * - concatenation
-     * - translation wrappers: __("..."), esc_html__(), etc.
-     * - sprintf("fmt %s", $x) -> "fmt {x}"
-     * For non-literals, we render placeholders like {var}, {func()}, {obj->prop}, {arr[key]}.
-     */
     private function extract_string( $expr ): string {
-        // Direct string
         if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
             return (string) $expr->value;
         }
 
-        // Interpolated strings
         if ( $expr instanceof \PhpParser\Node\Scalar\Encapsed ) {
             $out = '';
             foreach ( $expr->parts as $p ) {
@@ -329,29 +304,24 @@ trait KISS_WSE_Scanner {
             return $out;
         }
 
-        // Concatenation
         if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
             return $this->extract_string( $expr->left ) . $this->extract_string( $expr->right );
         }
 
-        // Translation wrappers
         if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
             $fn = strtolower( $expr->name->toString() );
 
-            // i18n wrappers like __("string", "domain")
             $i18n = [ '__', 'esc_html__', 'esc_attr__', '_x', '_nx', '_ex' ];
             if ( in_array( $fn, $i18n, true ) && isset( $expr->args[0] ) ) {
                 return $this->extract_string( $expr->args[0]->value );
             }
 
-            // sprintf("format %s ...", args...)
             if ( $fn === 'sprintf' && isset( $expr->args[0] ) ) {
                 $fmt = $this->extract_string( $expr->args[0]->value );
                 $argTokens = [];
                 for ( $i = 1; isset( $expr->args[$i] ); $i++ ) {
                     $argTokens[] = $this->expr_placeholder( $expr->args[$i]->value );
                 }
-                // Replace %s/%d etc. sequentially (simple heuristic)
                 $idx = 0;
                 $out = preg_replace_callback('/%[%bcdeEufFgGosxX]/', function($m) use (&$idx, $argTokens) {
                     if ($m[0] === '%%') return '%';
@@ -362,14 +332,9 @@ trait KISS_WSE_Scanner {
                 return $out ?? $fmt;
             }
         }
-
-        // Fallback placeholder
         return $this->expr_placeholder( $expr );
     }
 
-    /**
-     * Like extract_string(), but if it's not a clear string, return a placeholder.
-     */
     private function extract_string_or_placeholder( $expr ): string {
         $s = $this->extract_string( $expr );
         if ( $s !== '' && $s[0] !== '{' ) {
@@ -378,10 +343,6 @@ trait KISS_WSE_Scanner {
         return $this->expr_placeholder( $expr );
     }
 
-    /**
-     * Render a readable placeholder for an arbitrary expression.
-     * Examples: $postcode -> {postcode}, $arr[$state] -> {arr[$state]}, $obj->method() -> {obj->method()}
-     */
     private function expr_placeholder( $expr ): string {
         try {
             if ( $expr instanceof \PhpParser\Node\Expr\Variable ) {
@@ -421,7 +382,7 @@ trait KISS_WSE_Scanner {
                 return '{' . $expr->name->toString() . '()}';
             }
             if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
-                return $this->extract_string( $expr ); // handled already
+                return $this->extract_string( $expr );
             }
         } catch ( \Throwable $e ) {
             // ignore and fall through
@@ -429,9 +390,6 @@ trait KISS_WSE_Scanner {
         return '{?}';
     }
 
-    /**
-     * Describe a callback (string function name or array(Class/obj, 'method')).
-     */
     private function describe_callback( $expr ): string {
         try {
             if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
@@ -439,7 +397,6 @@ trait KISS_WSE_Scanner {
             }
             if ( $expr instanceof \PhpParser\Node\Expr\Array_ && isset( $expr->items[1] ) && $expr->items[1]->value instanceof \PhpParser\Node\Scalar\String_ ) {
                 $method = $expr->items[1]->value->value;
-                // Class/variable part may be complex; keep simple:
                 return '::' . $method;
             }
         } catch ( \Throwable $e ) {
@@ -448,10 +405,6 @@ trait KISS_WSE_Scanner {
         return '';
     }
 
-    /**
-     * Extract the rate key from unset($rates['key']) if available.
-     * Returns a literal or a readable placeholder. Attempts local variable resolution.
-     */
     private function extract_unset_rate_key( \PhpParser\Node $unsetStmt ): string {
         try {
             if ( $unsetStmt instanceof \PhpParser\Node\Stmt\Unset_ && isset( $unsetStmt->vars[0] ) && $unsetStmt->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
@@ -467,7 +420,6 @@ trait KISS_WSE_Scanner {
                     }
                 }
                 if ( $dim ) {
-                    // Render readable placeholder for dynamic key
                     $ph = $this->extract_string( $dim );
                     if ( $ph === '' ) {
                         $ph = $this->expr_placeholder( $dim );
@@ -481,10 +433,6 @@ trait KISS_WSE_Scanner {
         return '';
     }
 
-    /**
-     * If $expr is a variable, try to resolve a string assignment in the same function-like scope.
-     * Otherwise, return extract_string_or_placeholder().
-     */
     private function string_or_resolved_variable( \PhpParser\Node $ctx, $expr ): string {
         if ( $expr instanceof \PhpParser\Node\Expr\Variable && is_string( $expr->name ) ) {
             $val = $this->resolve_variable_value( $ctx, $expr->name );
@@ -495,13 +443,8 @@ trait KISS_WSE_Scanner {
         return $this->extract_string_or_placeholder( $expr );
     }
 
-    /**
-     * Resolve the most recent scalar string assigned to $varName in the same function-like scope
-     * before the line of $fromNode.
-     */
     private function resolve_variable_value( \PhpParser\Node $fromNode, string $varName ): ?string {
         try {
-            // Find nearest function-like ancestor
             $cur = $fromNode;
             $scope = null;
             while ( $cur ) {
@@ -523,7 +466,6 @@ trait KISS_WSE_Scanner {
                 if ( $as->var instanceof \PhpParser\Node\Expr\Variable && is_string( $as->var->name ) && $as->var->name === $varName ) {
                     $ln = (int) $as->getLine();
                     if ( $ln < $line && $ln > $bestLn ) {
-                        // Accept simple strings or expressions we can stringify
                         $str = $this->extract_string( $as->expr );
                         if ( $str === '' ) {
                             if ( $as->expr instanceof \PhpParser\Node\Scalar\String_ ) {
@@ -543,14 +485,10 @@ trait KISS_WSE_Scanner {
         }
     }
 
-    /**
-     * Return a natural-language description of the chain of enclosing conditions
-     * for a node (nearest first), e.g. "the cart contains drinks and the non-drink subtotal is under $20".
-     */
     private function condition_chain_text( \PhpParser\Node $node ): string {
         $conds = [];
         $cur = $node;
-        $limit = 4; // keep short
+        $limit = 4;
         while ( $limit-- > 0 && $cur ) {
             $parent = $cur->getAttribute('parent');
             if ( $parent instanceof \PhpParser\Node\Stmt\If_ ) {
@@ -560,15 +498,10 @@ trait KISS_WSE_Scanner {
             $cur = $parent instanceof \PhpParser\Node ? $parent : null;
         }
         if ( empty( $conds ) ) return '';
-        // De-duplicate simple repeats
         $conds = array_values( array_unique( array_filter( $conds ) ) );
         return implode( ' ' . __( 'and', 'kiss-woo-shipping-debugger' ) . ' ', $conds );
     }
 
-    /**
-     * Finds the assignment for a variable and returns a human-readable description of it.
-     * Special-cased for match expressions.
-     */
     private function describe_variable_assignment( \PhpParser\Node\Expr\Variable $var ): string {
         try {
             $varName = is_string( $var->name ) ? $var->name : null;
@@ -576,7 +509,6 @@ trait KISS_WSE_Scanner {
                 return $this->expr_placeholder( $var );
             }
 
-            // Find nearest function-like ancestor to limit scope
             $scope = null;
             $cur   = $var;
             while ( $cur = $cur->getAttribute( 'parent' ) ) {
@@ -588,7 +520,6 @@ trait KISS_WSE_Scanner {
             }
             if ( ! $scope ) return $this->expr_placeholder( $var );
 
-            // Find the last assignment to this variable before its use
             $finder  = new \PhpParser\NodeFinder();
             /** @var \PhpParser\Node\Expr\Assign[] $assigns */
             $assigns = array_filter(
@@ -606,12 +537,8 @@ trait KISS_WSE_Scanner {
         return $this->expr_placeholder( $var );
     }
 
-    /**
-     * Convert a boolean expression into a short readable phrase.
-     */
     private function cond_to_text( $expr ): string {
         try {
-            // (A && B) / (A || B)
             if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\BooleanAnd ) {
                 $left = $this->cond_to_text( $expr->left );
                 $right = $this->cond_to_text( $expr->right );
@@ -625,7 +552,6 @@ trait KISS_WSE_Scanner {
                 return trim( $left ) . $glue . trim( $right );
             }
 
-            // Special-case: strpos( ... , 'free_shipping') !== false  (or !=)
             $isFreeShip = function($call) {
                 return ($call instanceof \PhpParser\Node\Expr\FuncCall)
                     && ($call->name instanceof \PhpParser\Node\Name)
@@ -641,7 +567,6 @@ trait KISS_WSE_Scanner {
                 return __( 'the rate is a Free Shipping method', 'kiss-woo-shipping-debugger' );
             }
 
-            // Comparisons with friendly variable names
             $opMap = [
                 \PhpParser\Node\Expr\BinaryOp\Smaller::class        => '<',
                 \PhpParser\Node\Expr\BinaryOp\SmallerOrEqual::class => '<=',
@@ -654,7 +579,6 @@ trait KISS_WSE_Scanner {
             ];
             foreach ( $opMap as $cls => $op ) {
                 if ( $expr instanceof $cls ) {
-                    // adjusted_total < number → "the non-drink subtotal is under $N"
                     if ( $this->is_var_named( $expr->left, 'adjusted_total' ) && $this->is_number_like( $expr->right ) ) {
                         $num = $this->price_to_text( (float) $expr->right->value );
                         switch ( $op ) {
@@ -669,7 +593,6 @@ trait KISS_WSE_Scanner {
                 }
             }
 
-            // Negation
             if ( $expr instanceof \PhpParser\Node\Expr\BooleanNot ) {
                 $inner = $this->simple_expr_text( $expr->expr );
                 if ( $this->is_var_named( $expr->expr, 'has_drinks' ) ) {
@@ -678,12 +601,10 @@ trait KISS_WSE_Scanner {
                 return __( 'not', 'kiss-woo-shipping-debugger' ) . ' ' . $inner;
             }
 
-            // Bare variables with friendly names
             if ( $this->is_var_named( $expr, 'has_drinks' ) ) {
                 return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
             }
 
-            // Fallback
             return $this->simple_expr_text( $expr );
         } catch ( \Throwable $e ) {
             return '';
@@ -706,9 +627,6 @@ trait KISS_WSE_Scanner {
         return $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber;
     }
 
-    /**
-     * Render a short text for simple expressions used in conditions.
-     */
     private function simple_expr_text( $expr ): string {
         if ( $this->is_var_named( $expr, 'has_drinks' ) ) return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
         if ( $this->is_var_named( $expr, 'adjusted_total' ) ) return __( 'the non-drink subtotal', 'kiss-woo-shipping-debugger' );
@@ -734,11 +652,7 @@ trait KISS_WSE_Scanner {
         return $this->expr_placeholder( $expr );
     }
 
-    /**
-     * Heuristic: check if the immediate condition mentions free shipping.
-     */
     private function condition_mentions_free_shipping( \PhpParser\Node $node ): bool {
-        // Look at nearest If_ condition above the node for a strpos(..., 'free_shipping') !== false
         $cur = $node;
         $steps = 2;
         while ( $steps-- > 0 && $cur ) {

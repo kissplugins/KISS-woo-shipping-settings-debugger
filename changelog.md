@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.3.1
+* **Fix:** Corrected a regression where the scanner would only scan the default file OR the additional file, but not both. It now correctly scans the default `inc/shipping-restrictions.php` file first, and then scans the user-provided additional file.
+* **UX:** Clarified the instructional text for the "Scan Additional File" input field to be more precise about the expected path.
+
+## 2.3.0
+* **Feature:** Integrated a new self-test functionality directly into the plugin. This includes a `self-test.php` file with a variety of shipping logic examples for regression testing.
+* **Enhancement:** Added a "Self-Test" page under the "WooCommerce" > "Shipping Debugger" menu to provide instructions and a one-click link to run the test scan.
+* **Enhancement:** Added a "Self Test" link to the plugin's action links on the "All Plugins" page for quick access to the scanner with the self-test file pre-selected.
+* **Enhancement:** The admin menu for the debugger is now located under the main "WooCommerce" menu for better organization.
+* **Enhancement:** The scanner output now attempts to bold suspected product and state names within restriction messages to improve readability.
+
+## 2.2.0
+* **Enhancement:** Significantly improved the human-readability of the Custom Rules Scanner output.
+  * The scanner now describes the conditions (`if` statements) that trigger each rule, providing crucial context. For example, it will now say a rule runs "when the state is 'CA'".
+  * Placeholders for dynamic content in error messages are now simplified (e.g., `{restricted_states[{state}]}` is now displayed as `[state name]`), making the output cleaner and more intuitive.
+  * Added specific parsing for `has_term()` and `isset()` to produce more descriptive condition summaries.
+
 ## 2.1.0
 * **Major Refactor:** The Custom Rules Scanner has been re-architected to be more powerful and accurate. Instead of searching for specific hooks, it now scans the entire file for any shipping-related function calls (e.g., `$errors->add`, `unset($rates[...])`) and groups the results by the function they appear in. This allows it to find custom logic even if the corresponding `add_action` or `add_filter` call is in a different file.
 
