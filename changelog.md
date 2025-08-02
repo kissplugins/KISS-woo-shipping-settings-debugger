@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0
+* **Major Refactor:** The Custom Rules Scanner has been re-architected to be more powerful and accurate. Instead of searching for specific hooks, it now scans the entire file for any shipping-related function calls (e.g., `$errors->add`, `unset($rates[...])`) and groups the results by the function they appear in. This allows it to find custom logic even if the corresponding `add_action` or `add_filter` call is in a different file.
+
+## 2.0.0
+* **Major Enhancement:** The Custom Rules Scanner now detects checkout validation hooks (`woocommerce_checkout_process` and `woocommerce_after_checkout_validation`) to identify shipping restrictions implemented via `$errors->add()`. This allows the scanner to find rules that block checkout based on cart contents or shipping address, providing a more complete picture of all shipping-related logic.
+
+## 1.0.11
+* **Enhancement:** The Custom Rules Scanner now groups results by each hooked callback function, analyzing shipping logic inside individual functions.
+
 ## 1.0.10
 * **Enhancement:** Remembers the optional additional file to scan by saving it in the database.
 =======

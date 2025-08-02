@@ -45,7 +45,6 @@ trait KISS_WSE_Scanner {
                 continue;
             }
 
-            // If parser isn't available, skip with a message
             if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
                 echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
                 continue;
@@ -53,58 +52,94 @@ trait KISS_WSE_Scanner {
 
             $code   = file_get_contents( $file );
             $parser = $this->create_parser();
+            $ast    = $parser->parse( $code );
 
-            $ast       = $parser->parse( $code );
-            $trav      = new \PhpParser\NodeTraverser();
-            // Attach parent pointers so we can read enclosing conditions.
+            // Traverse the entire AST to find all relevant nodes at once.
+            $trav = new \PhpParser\NodeTraverser();
             $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
+            $visitor = new \KISSShippingDebugger\RateAddCallVisitor();
             $trav->addVisitor( $visitor );
             $trav->traverse( $ast );
 
-            // gather
-            $sections = [
-                'filterHooks' => $visitor->getFilterHookNodes(),
-                'feeHooks'    => $visitor->getFeeHookNodes(),
-                'rateCalls'   => $visitor->getAddRateNodes(),
-                'newRates'    => $visitor->getNewRateNodes(),
-                'unsetRates'  => $visitor->getUnsetRateNodes(),
-                'addFees'     => $visitor->getAddFeeNodes(),
-                'errors'      => $visitor->getErrorAddNodes(),
+            // Group all found nodes by their parent function.
+            $all_nodes = [
+                'rateCalls'  => $visitor->getAddRateNodes(),
+                'newRates'   => $visitor->getNewRateNodes(),
+                'unsetRates' => $visitor->getUnsetRateNodes(),
+                'addFees'    => $visitor->getAddFeeNodes(),
+                'errors'     => $visitor->getErrorAddNodes(),
             ];
 
-            // Titles
-            $titles = [
-                'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
-                'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
-                'rateCalls'   => __('add_rate() Calls',    'kiss-woo-shipping-debugger'),
-                'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
-                'unsetRates'  => __('unset($rates[])',     'kiss-woo-shipping-debugger'),
-                'addFees'     => __('add_fee() Calls',     'kiss-woo-shipping-debugger'),
-                'errors'      => __('Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger'),
-            ];
-
-            foreach ( $titles as $key => $title ) {
-                if ( ! empty( $sections[ $key ] ) ) {
-                    printf( '<h4>%s</h4><ul>', esc_html( $title ) );
-                    foreach ( $sections[ $key ] as $node ) {
-                        $line = (int) $node->getLine();
-                        $desc = $this->describe_node( $key, $node );
-                        printf(
-                            '<li><strong>%s</strong> — %s %s</li>',
-                            esc_html( $this->short_explanation_label( $key ) ),
-                            esc_html( $desc ),
-                            sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
-                        );
+            $grouped_by_function = [];
+            foreach ( $all_nodes as $key => $nodes ) {
+                foreach ( $nodes as $node ) {
+                    $func_name = $this->get_parent_function_name( $node );
+                    if ( ! isset( $grouped_by_function[ $func_name ] ) ) {
+                        $grouped_by_function[ $func_name ] = [];
                     }
-                    echo '</ul>';
+                    $grouped_by_function[ $func_name ][] = [ 'type' => $key, 'node' => $node ];
                 }
             }
 
-            if ( empty( array_filter( $sections ) ) ) {
-                echo '<p><em>' . esc_html__( 'No shipping-related hooks or methods found.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+            if ( empty( $grouped_by_function ) ) {
+                echo '<p><em>' . esc_html__( 'No shipping-related logic found in this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                continue;
+            }
+
+            // Render the results, grouped by function.
+            foreach ( $grouped_by_function as $func_name => $items ) {
+                printf( '<h4>%s <code>%s</code></h4>', esc_html__( 'Function:', 'kiss-woo-shipping-debugger' ), esc_html( $func_name ) );
+                echo '<ul>';
+                foreach ( $items as $item ) {
+                    $line = (int) $item['node']->getLine();
+                    $desc = $this->describe_node( $item['type'], $item['node'] );
+                    printf(
+                        '<li><strong>%s</strong> — %s %s</li>',
+                        esc_html( $this->short_explanation_label( $item['type'] ) ),
+                        esc_html( $desc ),
+                        sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
+                    );
+                }
+                echo '</ul>';
             }
         }
+    }
+
+    /**
+     * Get the name of the parent function for a given AST node.
+     */
+    private function get_parent_function_name( \PhpParser\Node $node ): string {
+        $current = $node;
+        while ( $current = $current->getAttribute( 'parent' ) ) {
+            if ( $current instanceof \PhpParser\Node\FunctionLike ) {
+                if ( $current instanceof \PhpParser\Node\Stmt\Function_ && $current->name instanceof \PhpParser\Node\Identifier ) {
+                    return $current->name->toString() . '()';
+                }
+                if ( $current instanceof \PhpParser\Node\Expr\Closure ) {
+                    return __( 'anonymous function', 'kiss-woo-shipping-debugger' );
+                }
+                if ( $current instanceof \PhpParser\Node\Stmt\ClassMethod && $current->name instanceof \PhpParser\Node\Identifier) {
+                    $className = $this->get_parent_class_name($current);
+                    return $className . '::' . $current->name->toString() . '()';
+                }
+            }
+             if ( ! $current instanceof \PhpParser\Node ) break;
+        }
+        return __( 'global scope', 'kiss-woo-shipping-debugger' );
+    }
+
+     /**
+     * Get the name of the parent class for a given AST node.
+     */
+    private function get_parent_class_name( \PhpParser\Node $node ): string {
+        $current = $node;
+        while ( $current = $current->getAttribute( 'parent' ) ) {
+            if ( $current instanceof \PhpParser\Node\Stmt\Class_ ) {
+                return $current->name instanceof \PhpParser\Node\Identifier ? $current->name->toString() : 'class';
+            }
+             if ( ! $current instanceof \PhpParser\Node ) break;
+        }
+        return '';
     }
 
     /**
