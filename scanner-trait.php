@@ -103,9 +103,16 @@ trait KISS_WSE_Scanner {
             echo '<p><em>' . esc_html__( 'No shipping-related rules found in the scanned files.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
             return;
         }
+
+        // Move "OTHER RULES" to the end of the list.
+        if ( isset( $grouped_rules['OTHER RULES'] ) ) {
+            $other_rules = $grouped_rules['OTHER RULES'];
+            unset( $grouped_rules['OTHER RULES'] );
+            $grouped_rules['OTHER RULES'] = $other_rules;
+        }
     
         foreach ( $grouped_rules as $product => $findings ) {
-            printf( '<h4><strong>%s</strong></h4>', esc_html( $product ) );
+            printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $product ) );
             echo '<ul>';
             foreach ( $findings as $finding ) {
                 $line = (int) $finding['node']->getLine();
@@ -758,32 +765,20 @@ trait KISS_WSE_Scanner {
     }
 
     /**
-     * Formats an array of strings into a human-readable list based on size.
+     * Formats an array of strings into a human-readable list.
      */
     private function format_array_for_display(array $items): string {
-        $count = count($items);
-        if ($count === 0) {
+        if ( empty($items) ) {
             return __( 'an empty list', 'kiss-woo-shipping-debugger' );
         }
 
         // Use only string values, filter out others.
         $string_items = array_filter($items, 'is_string');
-        $count = count($string_items);
-
-        if ($count <= 8) {
-            return implode(', ', $string_items);
+        
+        if ( empty($string_items) ) {
+            return __( 'an empty list', 'kiss-woo-shipping-debugger' );
         }
 
-        if ($count <= 20) {
-            $first_part = array_slice($string_items, 0, 6);
-            $more_count = $count - 6;
-            return sprintf(
-                '%s %s',
-                implode(', ', $first_part),
-                sprintf( __( 'and %d more', 'kiss-woo-shipping-debugger' ), $more_count )
-            );
-        }
-
-        return sprintf( __( '%d items', 'kiss-woo-shipping-debugger' ), $count );
+        return implode(', ', $string_items);
     }
 }
