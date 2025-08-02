@@ -1,101 +1,297 @@
 <?php
 /**
- * This file contains a collection of shipping-related code snippets intended for use
- * with the KISS Woo Shipping Debugger's self-test functionality. It is not meant to be
- * activated as a standalone plugin but rather to be scanned by the main debugger tool.
+ * =================================================================
+ * SELF-TEST MODULE FOR KISS WOO SHIPPING SETTINGS DEBUGGER
+ * =================================================================
+ * LLM Maintainer Note: The goal of this file is to provide a suite
+ * of practical and meaningful tests that prevent regressions in the
+ * plugin's core functionality. This version has been refactored for
+ * speed and real-time feedback, focusing on the plugin's internal
+ * logic rather than external WooCommerce APIs.
+ *
+ * When adding tests, ensure they are callable via the 'kiss_wse_run_single_test'
+ * AJAX action and clean up any artifacts they create (like temp files).
+ * =================================================================
  */
 
-if ( ! defined( 'ABSPATH' ) ) exit;
-
-// --- Test Case Functions ---
-
-/**
- * Scenario 1: A class that handles complex shipping modifications.
- */
-class KISS_WST_Test_Cases {
-
-    public function __construct() {
-        // These hooks are for demonstration and are not active unless this file is included by a test runner.
-        add_action( 'woocommerce_checkout_process', [ $this, 'state_based_restrictions' ] );
-        add_filter( 'woocommerce_package_rates', [ $this, 'modify_shipping_rates' ], 10, 2 );
-        add_action( 'woocommerce_cart_calculate_fees', [ $this, 'add_handling_fee' ] );
-    }
-
-    /**
-     * Restrict shipping of certain products to specific states.
-     */
-    public function state_based_restrictions() {
-        $shipping_country = 'US'; // Mock data for testing
-        $shipping_state = 'CA';   // Mock data for testing
-
-        if ( $shipping_country === 'US' && $shipping_state === 'CA' ) {
-            if ( has_term( 'restricted-product', 'product_cat' ) ) {
-                wc_add_notice( 'We cannot ship Restricted Products to <strong>California</strong>.', 'error' );
-            }
-        }
-        
-        if ($shipping_state === 'NY') {
-            wc_add_notice( 'Shipping to <strong>New York</strong> is currently unavailable for all items.', 'error' );
-        }
-    }
-
-    /**
-     * Modify available shipping rates based on cart contents.
-     */
-    public function modify_shipping_rates( $rates, $package ) {
-        // Unset a specific flat rate.
-        if ( isset( $rates['flat_rate:1'] ) ) {
-            unset( $rates['flat_rate:1'] );
-        }
-
-        $has_heavy_item = false;
-        foreach ($package['contents'] as $item) {
-            if ($item['data']->get_weight() > 50) {
-                $has_heavy_item = true;
-                break;
-            }
-        }
-
-        // Add a new rate if a heavy item is in the cart.
-        if ($has_heavy_item) {
-            $new_rate = new WC_Shipping_Rate( 'heavy_item_surcharge', 'Heavy Item Surcharge', 25.00 );
-            $rates['heavy_item_surcharge'] = $new_rate;
-        }
-        
-        return $rates;
-    }
-
-    /**
-     * Add a fee for special products.
-     */
-    public function add_handling_fee( $cart ) {
-        if ( is_admin() && ! defined( 'DOING_AJAX' ) ) {
-            return;
-        }
-
-        $special_product_in_cart = false;
-        foreach ( $cart->get_cart() as $cart_item ) {
-            if ( has_term( 'fragile', 'product_tag', $cart_item['product_id'] ) ) {
-                $special_product_in_cart = true;
-                break;
-            }
-        }
-
-        if ( $special_product_in_cart ) {
-            $cart->add_fee( 'Fragile Item Handling Fee', 7.50 );
-        }
-    }
+// If this file is called directly, abort.
+if ( ! defined( 'WPINC' ) ) {
+    die;
 }
 
+/**
+ * Adds the "Self Test" link to the plugin's Tools page menu.
+ */
+function kiss_wse_add_self_test_submenu_page() {
+    add_submenu_page(
+        'tools.php',
+        'KISS Shipping Self-Test',
+        'KISS Shipping Self-Test',
+        'manage_woocommerce',
+        'kiss-wse-self-test',
+        'kiss_wse_self_test_page_html'
+    );
+}
+// Note: Hook this into 'admin_menu' from the main plugin file.
+// add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
 
 /**
- * Scenario 4: A simple procedural function to add a checkout error.
+ * Renders the Self Test page HTML.
  */
-function kiss_wst_simple_checkout_validation() {
-    $postcode = '90210'; // Mock data
-    $restricted_postcodes = ['90210', '10001'];
-    if (in_array($postcode, $restricted_postcodes)) {
-        wc_add_notice( 'We do not ship to your postcode.', 'error');
+function kiss_wse_self_test_page_html() {
+    ?>
+    <div class="wrap">
+        <h1>KISS Shipping Debugger &mdash; Self-Test Suite</h1>
+        <p>This module helps verify core plugin functionality against the current environment. It focuses on the plugin's internal logic, such as AST scanning and data formatting helpers.</p>
+        <button id="kiss-wse-run-self-tests" class="button button-primary">Run All Tests</button>
+        <p id="kiss-wse-last-test-time">
+            <?php
+            $last_run = get_option( 'kiss_wse_tests_last_run' );
+            if ( $last_run ) {
+                echo '<strong>Tests Last Ran:</strong> ' . esc_html( date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $last_run ) );
+            }
+            ?>
+        </p>
+        <div id="kiss-wse-test-results-container" style="margin-top: 20px;"></div>
+    </div>
+
+    <script type="text/javascript">
+        jQuery(document).ready(function($) {
+            // Define the list of tests to run in sequence.
+            const tests = [
+                { id: 'dependency_check', name: 'Environment: Dependency Check' },
+                { id: 'summarize_method_helper', name: 'Helper: summarize_method()' },
+                { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
+                { id: 'ast_scanner_detection', name: 'Logic: AST Scanner Rule Detection' }
+            ];
+
+            $('#kiss-wse-run-self-tests').on('click', function() {
+                var button = $(this);
+                var resultsContainer = $('#kiss-wse-test-results-container');
+
+                button.prop('disabled', true);
+                resultsContainer.html('<table class="wp-list-table widefat striped" id="kiss-wse-results-table"><thead><tr>' +
+                    '<th style="width:25px;"></th>' +
+                    '<th>Test Name</th>' +
+                    '<th>Result</th>' +
+                    '</tr></thead><tbody></tbody></table>');
+                
+                runTest(0); // Start the test sequence
+            });
+
+            function runTest(index) {
+                if (index >= tests.length) {
+                    $('#kiss-wse-run-self-tests').prop('disabled', false);
+                    // Update timestamp after all tests are done
+                     $.post(ajaxurl, { action: 'kiss_wse_update_test_timestamp', nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>' }, function(response) {
+                        if (response.success) {
+                            $('#kiss-wse-last-test-time').html('<strong>Tests Last Ran:</strong> ' + response.data.time);
+                        }
+                    });
+                    return;
+                }
+
+                var test = tests[index];
+                var tableBody = $('#kiss-wse-results-table tbody');
+                var row = $('<tr><td class="test-icon"><span class="spinner is-active"></span></td><td><strong>' + test.name + '</strong></td><td class="test-message">Running...</td></tr>');
+                tableBody.append(row);
+
+                $.post(ajaxurl, {
+                    action: 'kiss_wse_run_single_test',
+                    nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>',
+                    test_id: test.id
+                }, function(response) {
+                    var icon = '';
+                    var message = '';
+
+                    if (response.success) {
+                        icon = '<span style="color:green; font-size:1.5em; line-height:1;" class="dashicons dashicons-yes-alt"></span>';
+                        message = response.data.message;
+                    } else {
+                        icon = '<span style="color:red; font-size:1.5em; line-height:1;" class="dashicons dashicons-dismiss"></span>';
+                        message = response.data.message || 'An unknown error occurred.';
+                    }
+
+                    row.find('.test-icon').html(icon);
+                    row.find('.test-message').html(message);
+                    
+                    runTest(index + 1); // Run the next test
+                }).fail(function() {
+                    var icon = '<span style="color:red; font-size:1.5em; line-height:1;" class="dashicons dashicons-dismiss"></span>';
+                    row.find('.test-icon').html(icon);
+                    row.find('.test-message').html('Failed to execute test (AJAX error).');
+                    $('#kiss-wse-run-self-tests').prop('disabled', false); // Stop on failure
+                });
+            }
+        });
+    </script>
+    <?php
+}
+
+/**
+ * Dispatches a single self-test based on the provided test ID.
+ */
+function kiss_wse_run_single_test_callback() {
+    check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( [ 'message' => 'Permission denied.' ] );
+    }
+
+    $test_id = isset( $_POST['test_id'] ) ? sanitize_key( $_POST['test_id'] ) : '';
+    $main_class = new KISS_WSE_Debugger();
+
+    switch ( $test_id ) {
+        case 'dependency_check':
+            $wc_ok = class_exists( 'WC_Shipping_Zones' );
+            $parser_ok = class_exists( 'PhpParser\\ParserFactory' );
+            if ( $wc_ok && $parser_ok ) {
+                wp_send_json_success( [ 'message' => 'WooCommerce and PHP-Parser classes are available.' ] );
+            } else {
+                $missing = [];
+                if ( !$wc_ok ) $missing[] = 'WooCommerce';
+                if ( !$parser_ok ) $missing[] = 'PHP-Parser';
+                wp_send_json_error( [ 'message' => 'Missing critical dependencies: ' . implode( ', ', $missing ) . '.' ] );
+            }
+            break;
+
+        case 'summarize_method_helper':
+            $mock_flat_rate = new class {
+                public $id = 'flat_rate';
+                public $title = 'Standard Shipping';
+                public $method_title = 'Standard Shipping';
+
+                public function get_option( $key, $default = '' ) {
+                    if ( $key === 'cost' ) {
+                        return '15.00';
+                    }
+                    return $default;
+                }
+            };
+            
+            $summary = $main_class->summarize_method($mock_flat_rate);
+            
+            $pass = (strpos($summary, 'Standard Shipping') !== false) &&
+                    (strpos($summary, 'cost') !== false) &&
+                    (strpos($summary, '15.00') !== false);
+
+            if ($pass) {
+                 wp_send_json_success( [ 'message' => 'Correctly generated summary for Flat Rate method.' ] );
+            } else {
+                 wp_send_json_error( [ 'message' => "Generated summary '{$summary}' did not contain the expected components." ] );
+            }
+            break;
+
+        case 'warning_logic_mock':
+            $mock_method = new class {
+                public $id = 'free_shipping';
+                public $enabled = 'yes';
+                public $title = 'Free Shipping';
+                public $method_title = 'Free Shipping';
+
+                public function get_option( $key, $default = '' ) {
+                    if ( $key === 'requires' ) return ''; // This triggers the warning
+                    return $default;
+                }
+            };
+
+            $mock_zone = new class {
+                public function get_zone_name() { return 'Mock Zone'; }
+                public function get_zone_locations() { return []; }
+                public function get_shipping_methods() { 
+                    $method = new class {
+                        public $id = 'free_shipping';
+                        public $enabled = 'yes';
+                        public $title = 'Free Shipping';
+                        public $method_title = 'Free Shipping';
+                        public function get_option($key, $default='') { if ($key === 'requires') return ''; return $default; }
+                    };
+                    return [ $method ]; 
+                }
+            };
+            
+            list( , , $warnings_html ) = $main_class->collect_zone_rows_from_data( [ $mock_zone ] );
+            if (strpos($warnings_html, 'Free Shipping has no requirement') !== false) {
+                wp_send_json_success( [ 'message' => 'Correctly identified "Free Shipping with no requirement" issue using mock data.' ] );
+            } else {
+                wp_send_json_error( [ 'message' => 'Failed to generate the expected warning for a misconfigured Free Shipping method.' ] );
+            }
+            break;
+
+        case 'ast_scanner_detection':
+            $test_file_path = null;
+            try {
+                if ( !class_exists( 'PhpParser\\ParserFactory' ) ) {
+                    throw new Exception("PHP-Parser not available.");
+                }
+                $child_theme_inc_dir = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc' );
+                if ( !is_dir($child_theme_inc_dir) ) {
+                    wp_mkdir_p($child_theme_inc_dir);
+                }
+                
+                $test_file_path = $child_theme_inc_dir . '/kiss-wse-self-test-rules.php';
+                $test_code = <<<PHP
+<?php
+unset(\$rates['flat_rate:1']);
+WC()->cart->add_fee( 'Test Surcharge', 10.50 );
+new WC_Shipping_Rate('test_id', 'Test Label', 99);
+PHP;
+                if (file_put_contents($test_file_path, $test_code) === false) {
+                    throw new Exception("Could not write to test file. Check permissions for " . $child_theme_inc_dir);
+                }
+
+                $output = $main_class->scan_single_file_for_test($test_file_path);
+
+                // CHANGED: The assertion now expects the <code> tag in the output.
+                $checks = [
+                    "Removes a shipping rate by key (<code>flat_rate:1</code>)",
+                    "label “Test Surcharge”, amount 10.5",
+                    "id “test_id”, label “Test Label”, cost 99"
+                ];
+
+                $failed_checks = [];
+                foreach ($checks as $check) {
+                    if (strpos($output, $check) === false) {
+                        $failed_checks[] = $check;
+                    }
+                }
+                
+                if (empty($failed_checks)) {
+                    wp_send_json_success( [ 'message' => 'Successfully detected and described all test rules.' ] );
+                } else {
+                    $error_message = 'Failed to find expected text: "' . esc_html(implode('", "', $failed_checks)) . '".<br><br><strong>Actual Scanner Output:</strong><pre>' . esc_html($output) . '</pre>';
+                    wp_send_json_error( [ 'message' => $error_message ] );
+                }
+
+            } catch( Exception $e ) {
+                wp_send_json_error( [ 'message' => 'Test failed: ' . $e->getMessage() ] );
+            } finally {
+                if ($test_file_path && file_exists($test_file_path)) {
+                    unlink($test_file_path);
+                }
+            }
+            break;
+
+        default:
+            wp_send_json_error( [ 'message' => 'Invalid test ID provided.' ] );
+            break;
     }
 }
-add_action('woocommerce_after_checkout_validation', 'kiss_wst_simple_checkout_validation');
+add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+
+/**
+ * AJAX handler to update the 'last run' timestamp.
+ */
+function kiss_wse_update_test_timestamp_callback() {
+    check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( [ 'message' => 'Permission denied.' ] );
+    }
+    
+    $timestamp = current_time( 'timestamp' );
+    update_option( 'kiss_wse_tests_last_run', $timestamp );
+
+    wp_send_json_success([
+        'time' => date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $timestamp ),
+    ]);
+}
+add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
