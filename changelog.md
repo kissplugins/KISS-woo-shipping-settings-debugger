@@ -1,8 +1,11 @@
 # Changelog
 
-## 1.0.10
-* **Enhancement:** Remembers the optional additional file to scan by saving it in the database.
-=======
+## 2.0.0
+* **Major Refactor:** The scanner logic has been completely refactored to be function-aware.
+  * Instead of a flat list of findings, the analysis is now grouped by the specific function hooked into WooCommerce. This provides a much clearer, more contextual narrative of what each piece of code does.
+  * Implemented a two-pass analysis: the first pass finds all `add_action`/`add_filter` calls to identify hooked functions, and the second pass analyzes the contents of each of those functions.
+  * This new approach makes the debugger's output significantly more intuitive and aligned with how developers read and understand code.
+
 ## 1.0.9
 * **Enhancement:** The scanner's description for `add_fee()` calls is now more abstract and human-readable. Instead of showing variable placeholders like `{surcharge}`, it now describes the conditional logic (e.g., from a `match` statement) that determines the fee amount, providing a clearer explanation of the rule.
 

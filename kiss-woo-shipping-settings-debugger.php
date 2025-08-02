@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     1.0.10
+ * Version:     2.0.0
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -14,6 +14,8 @@ define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 
 require_once __DIR__ . '/preview-trait.php';
 require_once __DIR__ . '/scanner-trait.php';
+require_once __DIR__ . '/lib/HookedFunction.php';
+require_once __DIR__ . '/lib/FunctionVisitor.php';
 
 add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
 /**
@@ -96,12 +98,8 @@ class KISS_WSE_Debugger {
      * Output the main admin page with scan and export options.
      */
     public function render_page(): void {
-        if ( isset( $_GET['wse_additional_file'] ) ) {
-            $additional = sanitize_text_field( wp_unslash( $_GET['wse_additional_file'] ) );
-            update_option( 'kiss_wse_additional_file', $additional );
-        } else {
-            $additional = sanitize_text_field( (string) get_option( 'kiss_wse_additional_file', '' ) );
-        }
+        $additional = $_GET['wse_additional_file'] ?? '';
+        $additional = sanitize_text_field( wp_unslash( $additional ) );
 
         echo '<div class="wrap">';
         echo '<h1>' . esc_html__( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
