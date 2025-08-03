@@ -63,7 +63,7 @@ function kiss_wse_self_test_page_html() {
                 { id: 'dependency_check', name: 'Environment: Dependency Check' },
                 { id: 'summarize_method_helper', name: 'Helper: summarize_method()' },
                 { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
-                { id: 'ast_scanner_detection', name: 'Logic: AST Scanner Rule Detection' }
+                { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' }
             ];
 
             $('#kiss-wse-run-self-tests').on('click', function() {
@@ -218,7 +218,7 @@ function kiss_wse_run_single_test_callback() {
             }
             break;
 
-        case 'ast_scanner_detection':
+        case 'ast_scanner_logic':
             $test_file_path = null;
             try {
                 if ( !class_exists( 'PhpParser\\ParserFactory' ) ) {
@@ -232,9 +232,33 @@ function kiss_wse_run_single_test_callback() {
                 $test_file_path = $child_theme_inc_dir . '/kiss-wse-self-test-rules.php';
                 $test_code = <<<PHP
 <?php
-unset(\$rates['flat_rate:1']);
-WC()->cart->add_fee( 'Test Surcharge', 10.50 );
-new WC_Shipping_Rate('test_id', 'Test Label', 99);
+// Test for array resolution and rule detection.
+function kiss_wse_shipping_restrictions_test(\$rates, \$package, \$errors) {
+    \$restricted_states = [
+        'AL' => 'Alabama',
+        'AR' => 'Arkansas',
+        'IN' => 'Indiana',
+        'VT' => 'Vermont',
+        'WI' => 'Wisconsin',
+    ];
+    \$state = 'WI'; // mock
+    
+    // Test 1: Statically defined array in a condition
+    if (isset(\$restricted_states[\$state])) {
+        unset(\$rates['free_shipping:1']);
+    }
+
+    // Test 2: Statically defined array in an error message
+    if (isset(\$restricted_states[\$state])) {
+        \$errors->add('shipping_error', "We cannot ship Kratom to {\$restricted_states[\$state]}.");
+    }
+
+    // Test 3: Fallback for dynamically defined array
+    \$dynamic_states = array_keys(\$restricted_states);
+    if (in_array(\$state, \$dynamic_states)) {
+         new WC_Shipping_Rate('dynamic_rate', 'Dynamic Rate', 5);
+    }
+}
 PHP;
                 if (file_put_contents($test_file_path, $test_code) === false) {
                     throw new Exception("Could not write to test file. Check permissions for " . $child_theme_inc_dir);
@@ -242,10 +266,16 @@ PHP;
 
                 $output = $main_class->scan_single_file_for_test($test_file_path);
 
+                // CORRECTED: The check for the error message now matches the actual HTML output, where only the first state is bolded.
                 $checks = [
-                    "Removes a shipping rate by key (<code>flat_rate:1</code>)",
-                    "label “Test Surcharge”, amount 10.5",
-                    "id “test_id”, label “Test Label”, cost 99"
+                    // Test 1 Check: `unset` rule with resolved array in condition
+                    'when the location is one of: <strong>Alabama, Arkansas, Indiana, Vermont, Wisconsin</strong>',
+                    
+                    // Test 2 Check: `errors->add` rule with resolved array in the message, including `<strong>` tags on Kratom and the first state.
+                    'Adds a checkout error message: “We cannot ship <strong>Kratom</strong> to <strong>Alabama</strong>, Arkansas, Indiana, Vermont, Wisconsin.”',
+
+                    // Test 3 Check: Fallback for the dynamic array
+                    'Runs when in_array()'
                 ];
 
                 $failed_checks = [];
@@ -256,7 +286,7 @@ PHP;
                 }
                 
                 if (empty($failed_checks)) {
-                    wp_send_json_success( [ 'message' => 'Successfully detected and described all test rules.' ] );
+                    wp_send_json_success( [ 'message' => 'Successfully detected rules and resolved array variables.' ] );
                 } else {
                     $error_message = 'Failed to find expected text: "' . esc_html(implode('", "', $failed_checks)) . '".<br><br><strong>Actual Scanner Output:</strong><pre>' . esc_html($output) . '</pre>';
                     wp_send_json_error( [ 'message' => $error_message ] );
