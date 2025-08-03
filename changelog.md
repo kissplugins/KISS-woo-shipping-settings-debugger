@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.5.0
+* **Feature:** Added a "Grouping Type" toggle above the Custom Rules Scanner results, allowing reports to be viewed by Product (original behavior) or by the function/method containing each finding.
+
 ## 2.4.0
 * **Enhancement:** The Custom Rules Scanner now resolves array variables within the scanned code. It replaces placeholders like `{restricted_states}` in rule descriptions with a human-readable list of the actual states or postal codes, providing much richer context.
 
