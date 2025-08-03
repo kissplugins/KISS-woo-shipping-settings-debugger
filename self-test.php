@@ -69,6 +69,12 @@ function kiss_wse_self_test_page_html() {
     $theme_name    = $theme->get( 'Name' );
     $theme_version = $theme->get( 'Version' );
 
+    if ( ! function_exists( 'get_plugin_data' ) ) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $plugin_data    = get_plugin_data( KISS_WSE_PLUGIN_FILE );
+    $plugin_version = $plugin_data['Version'] ?? __( 'N/A', 'kiss-woo-shipping-debugger' );
+
     ?>
     <div class="wrap">
         <h1>KISS Shipping Debugger &mdash; Self-Test Suite</h1>
@@ -81,6 +87,7 @@ function kiss_wse_self_test_page_html() {
                 <li><?php printf( esc_html__( 'MySQL: %s', 'kiss-woo-shipping-debugger' ), esc_html( $mysql_version ) ); ?></li>
                 <li><?php printf( esc_html__( 'WooCommerce: %s', 'kiss-woo-shipping-debugger' ), esc_html( $wc_version ) ); ?></li>
                 <li><?php echo esc_html( $theme_name ) . ': ' . esc_html( $theme_version ); ?></li>
+                <li><?php printf( esc_html__( 'KISS Shipping Debugger: %s', 'kiss-woo-shipping-debugger' ), esc_html( $plugin_version ) ); ?></li>
             </ul>
         </div>
 
