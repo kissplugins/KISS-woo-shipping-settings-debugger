@@ -37,12 +37,60 @@ function kiss_wse_add_self_test_submenu_page() {
 // add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
 
 /**
+ * Retrieves the first lines of the changelog.
+ *
+ * @param int $lines Number of lines to retrieve. Default 100.
+ * @return string Changelog preview contents.
+ */
+function kiss_wse_get_changelog_preview( $lines = 100 ) {
+    $file = plugin_dir_path( __FILE__ ) . 'changelog.md';
+    if ( ! file_exists( $file ) ) {
+        return __( 'changelog.md file not found.', 'kiss-woo-shipping-debugger' );
+    }
+
+    $contents = file( $file );
+    if ( false === $contents ) {
+        return __( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' );
+    }
+
+    return implode( '', array_slice( $contents, 0, $lines ) );
+}
+
+/**
  * Renders the Self Test page HTML.
  */
 function kiss_wse_self_test_page_html() {
+    $wp_version    = get_bloginfo( 'version' );
+    $php_version   = PHP_VERSION;
+    global $wpdb;
+    $mysql_version = $wpdb->db_version();
+    $wc_version    = defined( 'WC_VERSION' ) ? WC_VERSION : __( 'N/A', 'kiss-woo-shipping-debugger' );
+    $theme         = wp_get_theme();
+    $theme_name    = $theme->get( 'Name' );
+    $theme_version = $theme->get( 'Version' );
+
+    if ( ! function_exists( 'get_plugin_data' ) ) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $plugin_data    = get_plugin_data( KISS_WSE_PLUGIN_FILE );
+    $plugin_version = $plugin_data['Version'] ?? __( 'N/A', 'kiss-woo-shipping-debugger' );
+
     ?>
     <div class="wrap">
         <h1>KISS Shipping Debugger &mdash; Self-Test Suite</h1>
+
+        <div id="kiss-wse-version-info" style="margin-top: 20px;">
+            <h2><?php esc_html_e( 'Environment Versions', 'kiss-woo-shipping-debugger' ); ?></h2>
+            <ul>
+                <li><?php printf( esc_html__( 'WordPress: %s', 'kiss-woo-shipping-debugger' ), esc_html( $wp_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'PHP: %s', 'kiss-woo-shipping-debugger' ), esc_html( $php_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'MySQL: %s', 'kiss-woo-shipping-debugger' ), esc_html( $mysql_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'WooCommerce: %s', 'kiss-woo-shipping-debugger' ), esc_html( $wc_version ) ); ?></li>
+                <li><?php echo esc_html( $theme_name ) . ': ' . esc_html( $theme_version ); ?></li>
+                <li><?php printf( esc_html__( 'KISS Shipping Debugger: %s', 'kiss-woo-shipping-debugger' ), esc_html( $plugin_version ) ); ?></li>
+            </ul>
+        </div>
+
         <p>This module helps verify core plugin functionality against the current environment. It focuses on the plugin's internal logic, such as AST scanning and data formatting helpers.</p>
         <button id="kiss-wse-run-self-tests" class="button button-primary">Run All Tests</button>
         <p id="kiss-wse-last-test-time">
@@ -54,6 +102,12 @@ function kiss_wse_self_test_page_html() {
             ?>
         </p>
         <div id="kiss-wse-test-results-container" style="margin-top: 20px;"></div>
+
+        <div id="kiss-wse-changelog-viewer" style="margin-top: 40px;">
+            <h2><?php esc_html_e( 'Changelog Preview', 'kiss-woo-shipping-debugger' ); ?></h2>
+            <pre><?php echo esc_html( kiss_wse_get_changelog_preview() ); ?></pre>
+            <p><?php esc_html_e( 'To review the rest, open changelog.md in a text editor.', 'kiss-woo-shipping-debugger' ); ?></p>
+        </div>
     </div>
 
     <script type="text/javascript">
@@ -63,7 +117,7 @@ function kiss_wse_self_test_page_html() {
                 { id: 'dependency_check', name: 'Environment: Dependency Check' },
                 { id: 'summarize_method_helper', name: 'Helper: summarize_method()' },
                 { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
-                { id: 'ast_scanner_detection', name: 'Logic: AST Scanner Rule Detection' }
+                { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' }
             ];
 
             $('#kiss-wse-run-self-tests').on('click', function() {
@@ -218,7 +272,7 @@ function kiss_wse_run_single_test_callback() {
             }
             break;
 
-        case 'ast_scanner_detection':
+        case 'ast_scanner_logic':
             $test_file_path = null;
             try {
                 if ( !class_exists( 'PhpParser\\ParserFactory' ) ) {
@@ -232,9 +286,33 @@ function kiss_wse_run_single_test_callback() {
                 $test_file_path = $child_theme_inc_dir . '/kiss-wse-self-test-rules.php';
                 $test_code = <<<PHP
 <?php
-unset(\$rates['flat_rate:1']);
-WC()->cart->add_fee( 'Test Surcharge', 10.50 );
-new WC_Shipping_Rate('test_id', 'Test Label', 99);
+// Test for array resolution and rule detection.
+function kiss_wse_shipping_restrictions_test(\$rates, \$package, \$errors) {
+    \$restricted_states = [
+        'AL' => 'Alabama',
+        'AR' => 'Arkansas',
+        'IN' => 'Indiana',
+        'VT' => 'Vermont',
+        'WI' => 'Wisconsin',
+    ];
+    \$state = 'WI'; // mock
+    
+    // Test 1: Statically defined array in a condition
+    if (isset(\$restricted_states[\$state])) {
+        unset(\$rates['free_shipping:1']);
+    }
+
+    // Test 2: Statically defined array in an error message
+    if (isset(\$restricted_states[\$state])) {
+        \$errors->add('shipping_error', "We cannot ship Kratom to {\$restricted_states[\$state]}.");
+    }
+
+    // Test 3: Fallback for dynamically defined array
+    \$dynamic_states = array_keys(\$restricted_states);
+    if (in_array(\$state, \$dynamic_states)) {
+         new WC_Shipping_Rate('dynamic_rate', 'Dynamic Rate', 5);
+    }
+}
 PHP;
                 if (file_put_contents($test_file_path, $test_code) === false) {
                     throw new Exception("Could not write to test file. Check permissions for " . $child_theme_inc_dir);
@@ -242,10 +320,16 @@ PHP;
 
                 $output = $main_class->scan_single_file_for_test($test_file_path);
 
+                // CORRECTED: The check for the error message now matches the actual HTML output, where only the first state is bolded.
                 $checks = [
-                    "Removes a shipping rate by key (<code>flat_rate:1</code>)",
-                    "label “Test Surcharge”, amount 10.5",
-                    "id “test_id”, label “Test Label”, cost 99"
+                    // Test 1 Check: `unset` rule with resolved array in condition
+                    'when the location is one of: <strong>Alabama, Arkansas, Indiana, Vermont, Wisconsin</strong>',
+                    
+                    // Test 2 Check: `errors->add` rule with resolved array in the message, including `<strong>` tags on Kratom and the first state.
+                    'Adds a checkout error message: “We cannot ship <strong>Kratom</strong> to <strong>Alabama</strong>, Arkansas, Indiana, Vermont, Wisconsin.”',
+
+                    // Test 3 Check: Fallback for the dynamic array
+                    'Runs when in_array()'
                 ];
 
                 $failed_checks = [];
@@ -256,7 +340,7 @@ PHP;
                 }
                 
                 if (empty($failed_checks)) {
-                    wp_send_json_success( [ 'message' => 'Successfully detected and described all test rules.' ] );
+                    wp_send_json_success( [ 'message' => 'Successfully detected rules and resolved array variables.' ] );
                 } else {
                     $error_message = 'Failed to find expected text: "' . esc_html(implode('", "', $failed_checks)) . '".<br><br><strong>Actual Scanner Output:</strong><pre>' . esc_html($output) . '</pre>';
                     wp_send_json_error( [ 'message' => $error_message ] );
