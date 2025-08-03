@@ -81,44 +81,73 @@ trait KISS_WSE_Scanner {
             }
         }
     
-        // --- 3. GROUP FINDINGS BY PRODUCT KEYWORD ---
-        $grouped_rules = [];
+        // --- 3. GROUP FINDINGS ---
+        $product_groups  = [];
+        $function_groups = [];
         $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
-    
+
         foreach ( $all_findings as $finding ) {
-            $description = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'], true ); // Get raw description
-            $found_keyword = 'OTHER RULES'; // Default group
-    
+            // Group by product keyword
+            $description  = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'], true );
+            $found_keyword = 'OTHER RULES';
             foreach ( $product_keywords as $keyword ) {
                 if ( stripos( $description, $keyword ) !== false ) {
-                    $found_keyword = strtoupper($keyword);
+                    $found_keyword = strtoupper( $keyword );
                     break;
                 }
             }
-            $grouped_rules[$found_keyword][] = $finding;
+            $product_groups[ $found_keyword ][] = $finding;
+
+            // Group by containing function/method
+            $scope = $this->getCurrentScopeKey( $finding['node'] );
+            if ( $scope === '__global__' ) {
+                $scope = __( 'Global Scope', 'kiss-woo-shipping-debugger' );
+            } elseif ( 0 === strpos( $scope, 'closure@line:' ) ) {
+                $line_no = (int) substr( $scope, strlen( 'closure@line:' ) );
+                $scope   = sprintf( __( 'Closure at line %d', 'kiss-woo-shipping-debugger' ), $line_no );
+            }
+            $group_key = $scope . ' (' . basename( $finding['file'] ) . ')';
+            $function_groups[ $group_key ][] = $finding;
         }
 
-        // --- 4. RENDER THE GROUPED OUTPUT ---
-        if ( empty($grouped_rules) ) {
+        // --- 4. RENDER GROUPED OUTPUT WITH TOGGLE ---
+        if ( empty( $product_groups ) && empty( $function_groups ) ) {
             echo '<p><em>' . esc_html__( 'No shipping-related rules found in the scanned files.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
             return;
         }
 
-        // Move "OTHER RULES" to the end of the list.
-        if ( isset( $grouped_rules['OTHER RULES'] ) ) {
-            $other_rules = $grouped_rules['OTHER RULES'];
-            unset( $grouped_rules['OTHER RULES'] );
-            $grouped_rules['OTHER RULES'] = $other_rules;
+        // Move "OTHER RULES" to the end of the product grouping.
+        if ( isset( $product_groups['OTHER RULES'] ) ) {
+            $other_rules = $product_groups['OTHER RULES'];
+            unset( $product_groups['OTHER RULES'] );
+            $product_groups['OTHER RULES'] = $other_rules;
         }
-    
-        foreach ( $grouped_rules as $product => $findings ) {
+
+        // Toggle Styles
+        echo '<style>
+        .kiss-toggle-control{display:inline-flex;background-color:#e0e0e0;border-radius:15px;padding:2px;border:1px solid #c9c9c9}
+        .kiss-toggle-control input[type="radio"]{display:none}
+        .kiss-toggle-control label{margin-bottom:0;padding:4px 12px;font-size:13px;line-height:1.5;cursor:pointer;border-radius:13px;transition:all .2s ease-in-out;color:#50575e;font-weight:400}
+        .kiss-toggle-control input[type="radio"]:checked+label{background-color:#fff;color:#1d2327;box-shadow:0 1px 1px rgba(0,0,0,.1);font-weight:600}
+        .kiss-report-content{display:none;margin-top:20px;padding:15px;border:1px solid #ddd}
+        .kiss-report-content.active{display:block}
+        </style>';
+
+        // Toggle Control
+        echo '<div class="kiss-toggle-control" style="margin-top:15px;margin-bottom:15px;">';
+        echo '<input type="radio" id="grouping_product" name="grouping_type" value="product" checked><label for="grouping_product">' . esc_html__( 'Product', 'kiss-woo-shipping-debugger' ) . '</label>';
+        echo '<input type="radio" id="grouping_function" name="grouping_type" value="function"><label for="grouping_function">' . esc_html__( 'Functional', 'kiss-woo-shipping-debugger' ) . '</label>';
+        echo '</div>';
+
+        // Product Grouping Content
+        echo '<div id="grouping-product" class="kiss-report-content active">';
+        foreach ( $product_groups as $product => $findings ) {
             printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $product ) );
             echo '<ul>';
             foreach ( $findings as $finding ) {
-                $line = (int) $finding['node']->getLine();
+                $line     = (int) $finding['node']->getLine();
                 $filename = basename( $finding['file'] );
-                $desc = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] ); // Get formatted description
-                
+                $desc     = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
@@ -128,6 +157,43 @@ trait KISS_WSE_Scanner {
             }
             echo '</ul>';
         }
+        echo '</div>';
+
+        // Functional Grouping Content
+        echo '<div id="grouping-function" class="kiss-report-content">';
+        foreach ( $function_groups as $func => $findings ) {
+            printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $func ) );
+            echo '<ul>';
+            foreach ( $findings as $finding ) {
+                $line     = (int) $finding['node']->getLine();
+                $filename = basename( $finding['file'] );
+                $desc     = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
+                printf(
+                    '<li><strong>%s</strong> — %s %s</li>',
+                    esc_html( $this->short_explanation_label( $finding['key'] ) ),
+                    wp_kses_post( $desc ),
+                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                );
+            }
+            echo '</ul>';
+        }
+        echo '</div>';
+
+        // Toggle Script
+        echo '<script>
+        document.addEventListener("DOMContentLoaded",function(){
+            const radios=document.querySelectorAll("input[name=\'grouping_type\']");
+            const contents=document.querySelectorAll(".kiss-report-content");
+            function update(){
+                const val=document.querySelector("input[name=\'grouping_type\']:checked").value;
+                contents.forEach(c=>c.classList.remove("active"));
+                const active=document.getElementById("grouping-"+val);
+                if(active){active.classList.add("active");}
+            }
+            radios.forEach(r=>r.addEventListener("change",update));
+            update();
+        });
+        </script>';
     }
 
     private function create_parser() {

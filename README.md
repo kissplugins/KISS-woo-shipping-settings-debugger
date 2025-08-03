@@ -98,6 +98,15 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
 - You may optionally scan **one** more file **inside the same `/inc/` directory** (e.g., `extra.php` or `subdir/custom.php`).
 - The scanner prints findings grouped by type, with **human-readable** descriptions and line numbers.
 
+- A "Grouping Type" toggle lets you switch between **Product** and **Functional** views.
+
+#### Grouping Types
+
+| Grouping Type | Pros | Cons |
+| ------------- | ---- | ---- |
+| **Product** (default) | Highlights which shipping methods are affected, making it easy for store owners to look up a specific rate. | Context split across multiple products; less narrative about how functions operate. |
+| **Functional** | Groups findings by the function or method that contains the logic, presenting conditions and actions together for a story-like view. | Requires reading function names to know which products are affected at a glance. |
+
 ---
 
 ## == Developer Onboarding (Semi-Technical) ==
