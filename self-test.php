@@ -37,23 +37,36 @@ function kiss_wse_add_self_test_submenu_page() {
 // add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
 
 /**
- * Retrieves the first lines of the changelog.
+ * Retrieves the changelog, rendered as HTML if possible.
  *
- * @param int $lines Number of lines to retrieve. Default 100.
- * @return string Changelog preview contents.
+ * @param int $lines Number of lines to retrieve for plain text fallback. Default 100.
+ * @return string Changelog preview contents (HTML).
  */
 function kiss_wse_get_changelog_preview( $lines = 100 ) {
     $file = plugin_dir_path( __FILE__ ) . 'changelog.md';
     if ( ! file_exists( $file ) ) {
-        return __( 'changelog.md file not found.', 'kiss-woo-shipping-debugger' );
+        return '<p>' . esc_html__( 'changelog.md file not found.', 'kiss-woo-shipping-debugger' ) . '</p>';
     }
 
+    // If the Markdown Viewer plugin is active, use it to render the file.
+    if ( function_exists( 'kiss_mdv_render_file' ) ) {
+        $html = kiss_mdv_render_file( $file );
+        // The renderer might return an empty string on failure.
+        if ( ! empty( $html ) ) {
+            return $html;
+        }
+    }
+
+    // Fallback to a simple plain text preview.
     $contents = file( $file );
     if ( false === $contents ) {
-        return __( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' );
+        return '<p>' . esc_html__( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' ) . '</p>';
     }
 
-    return implode( '', array_slice( $contents, 0, $lines ) );
+    $fallback_html  = '<p><em>' . esc_html__( 'To see this rendered as HTML, please install the KISS Markdown Viewer plugin.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+    $fallback_html .= '<pre>' . esc_html( implode( '', array_slice( $contents, 0, $lines ) ) ) . '</pre>';
+
+    return $fallback_html;
 }
 
 /**
@@ -105,8 +118,10 @@ function kiss_wse_self_test_page_html() {
 
         <div id="kiss-wse-changelog-viewer" style="margin-top: 40px;">
             <h2><?php esc_html_e( 'Changelog Preview', 'kiss-woo-shipping-debugger' ); ?></h2>
-            <pre><?php echo esc_html( kiss_wse_get_changelog_preview() ); ?></pre>
-            <p><?php esc_html_e( 'To review the rest, open changelog.md in a text editor.', 'kiss-woo-shipping-debugger' ); ?></p>
+            <div class="changelog-content" style="padding: 1px 15px; border: 1px solid #ccd0d4; background: #fff; max-height: 400px; overflow-y: auto;">
+                <?php echo wp_kses_post( kiss_wse_get_changelog_preview() ); ?>
+            </div>
+            <p style="margin-top: 8px;"><?php esc_html_e( 'To review the rest, open changelog.md in a text editor.', 'kiss-woo-shipping-debugger' ); ?></p>
         </div>
     </div>
 
