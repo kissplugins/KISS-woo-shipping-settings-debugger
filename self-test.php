@@ -37,12 +37,53 @@ function kiss_wse_add_self_test_submenu_page() {
 // add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
 
 /**
+ * Retrieves the first lines of the changelog.
+ *
+ * @param int $lines Number of lines to retrieve. Default 100.
+ * @return string Changelog preview contents.
+ */
+function kiss_wse_get_changelog_preview( $lines = 100 ) {
+    $file = plugin_dir_path( __FILE__ ) . 'changelog.md';
+    if ( ! file_exists( $file ) ) {
+        return __( 'changelog.md file not found.', 'kiss-woo-shipping-debugger' );
+    }
+
+    $contents = file( $file );
+    if ( false === $contents ) {
+        return __( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' );
+    }
+
+    return implode( '', array_slice( $contents, 0, $lines ) );
+}
+
+/**
  * Renders the Self Test page HTML.
  */
 function kiss_wse_self_test_page_html() {
+    $wp_version    = get_bloginfo( 'version' );
+    $php_version   = PHP_VERSION;
+    global $wpdb;
+    $mysql_version = $wpdb->db_version();
+    $wc_version    = defined( 'WC_VERSION' ) ? WC_VERSION : __( 'N/A', 'kiss-woo-shipping-debugger' );
+    $theme         = wp_get_theme();
+    $theme_name    = $theme->get( 'Name' );
+    $theme_version = $theme->get( 'Version' );
+
     ?>
     <div class="wrap">
         <h1>KISS Shipping Debugger &mdash; Self-Test Suite</h1>
+
+        <div id="kiss-wse-version-info" style="margin-top: 20px;">
+            <h2><?php esc_html_e( 'Environment Versions', 'kiss-woo-shipping-debugger' ); ?></h2>
+            <ul>
+                <li><?php printf( esc_html__( 'WordPress: %s', 'kiss-woo-shipping-debugger' ), esc_html( $wp_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'PHP: %s', 'kiss-woo-shipping-debugger' ), esc_html( $php_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'MySQL: %s', 'kiss-woo-shipping-debugger' ), esc_html( $mysql_version ) ); ?></li>
+                <li><?php printf( esc_html__( 'WooCommerce: %s', 'kiss-woo-shipping-debugger' ), esc_html( $wc_version ) ); ?></li>
+                <li><?php echo esc_html( $theme_name ) . ': ' . esc_html( $theme_version ); ?></li>
+            </ul>
+        </div>
+
         <p>This module helps verify core plugin functionality against the current environment. It focuses on the plugin's internal logic, such as AST scanning and data formatting helpers.</p>
         <button id="kiss-wse-run-self-tests" class="button button-primary">Run All Tests</button>
         <p id="kiss-wse-last-test-time">
@@ -54,6 +95,12 @@ function kiss_wse_self_test_page_html() {
             ?>
         </p>
         <div id="kiss-wse-test-results-container" style="margin-top: 20px;"></div>
+
+        <div id="kiss-wse-changelog-viewer" style="margin-top: 40px;">
+            <h2><?php esc_html_e( 'Changelog Preview', 'kiss-woo-shipping-debugger' ); ?></h2>
+            <pre><?php echo esc_html( kiss_wse_get_changelog_preview() ); ?></pre>
+            <p><?php esc_html_e( 'To review the rest, open changelog.md in a text editor.', 'kiss-woo-shipping-debugger' ); ?></p>
+        </div>
     </div>
 
     <script type="text/javascript">
