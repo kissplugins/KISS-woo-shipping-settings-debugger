@@ -81,44 +81,51 @@ trait KISS_WSE_Scanner {
             }
         }
     
-        // --- 3. GROUP FINDINGS BY PRODUCT KEYWORD ---
-        $grouped_rules = [];
-        $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
-    
-        foreach ( $all_findings as $finding ) {
-            $description = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'], true ); // Get raw description
-            $found_keyword = 'OTHER RULES'; // Default group
-    
-            foreach ( $product_keywords as $keyword ) {
-                if ( stripos( $description, $keyword ) !== false ) {
-                    $found_keyword = strtoupper($keyword);
-                    break;
-                }
-            }
-            $grouped_rules[$found_keyword][] = $finding;
-        }
-
-        // --- 4. RENDER THE GROUPED OUTPUT ---
-        if ( empty($grouped_rules) ) {
+        if ( empty( $all_findings ) ) {
             echo '<p><em>' . esc_html__( 'No shipping-related rules found in the scanned files.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
             return;
         }
 
-        // Move "OTHER RULES" to the end of the list.
+        echo '<div id="product-content" class="kiss-group-content active">';
+        $this->render_product_grouping( $all_findings, $collected_arrays );
+        echo '</div>';
+
+        echo '<div id="functional-content" class="kiss-group-content">';
+        $this->render_functional_grouping( $all_findings, $collected_arrays );
+        echo '</div>';
+    }
+
+    private function render_product_grouping( array $all_findings, array $collected_arrays ): void {
+        $grouped_rules = [];
+        $product_keywords = ['Kratom', 'Amanita Mushroom', 'THC-A', 'CBD'];
+
+        foreach ( $all_findings as $finding ) {
+            $description = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'], true );
+            $found_keyword = 'OTHER RULES';
+
+            foreach ( $product_keywords as $keyword ) {
+                if ( stripos( $description, $keyword ) !== false ) {
+                    $found_keyword = strtoupper( $keyword );
+                    break;
+                }
+            }
+            $grouped_rules[ $found_keyword ][] = $finding;
+        }
+
         if ( isset( $grouped_rules['OTHER RULES'] ) ) {
             $other_rules = $grouped_rules['OTHER RULES'];
             unset( $grouped_rules['OTHER RULES'] );
             $grouped_rules['OTHER RULES'] = $other_rules;
         }
-    
+
         foreach ( $grouped_rules as $product => $findings ) {
             printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $product ) );
             echo '<ul>';
             foreach ( $findings as $finding ) {
-                $line = (int) $finding['node']->getLine();
+                $line     = (int) $finding['node']->getLine();
                 $filename = basename( $finding['file'] );
-                $desc = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] ); // Get formatted description
-                
+                $desc     = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
+
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
@@ -128,6 +135,55 @@ trait KISS_WSE_Scanner {
             }
             echo '</ul>';
         }
+    }
+
+    private function render_functional_grouping( array $all_findings, array $collected_arrays ): void {
+        $grouped = [];
+        foreach ( $all_findings as $finding ) {
+            $function = $this->get_enclosing_function_name( $finding['node'] );
+            $label    = sprintf( '%s — %s', $function, basename( $finding['file'] ) );
+            $grouped[ $label ][] = $finding;
+        }
+
+        foreach ( $grouped as $label => $findings ) {
+            printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $label ) );
+            echo '<ul>';
+            foreach ( $findings as $finding ) {
+                $line     = (int) $finding['node']->getLine();
+                $filename = basename( $finding['file'] );
+                $desc     = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
+
+                printf(
+                    '<li><strong>%s</strong> — %s %s</li>',
+                    esc_html( $this->short_explanation_label( $finding['key'] ) ),
+                    wp_kses_post( $desc ),
+                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                );
+            }
+            echo '</ul>';
+        }
+    }
+
+    private function get_enclosing_function_name( \PhpParser\Node $node ): string {
+        $current = $node;
+        while ( $parent = $current->getAttribute( 'parent' ) ) {
+            if ( $parent instanceof \PhpParser\Node\FunctionLike ) {
+                if ( $parent instanceof \PhpParser\Node\Stmt\ClassMethod ) {
+                    $class = $parent->getAttribute( 'parent' );
+                    $class_name = ( $class instanceof \PhpParser\Node\Stmt\ClassLike && $class->name instanceof \PhpParser\Node\Identifier )
+                        ? $class->name->toString() . '::'
+                        : '';
+                    $method = $parent->name instanceof \PhpParser\Node\Identifier ? $parent->name->toString() : '';
+                    return $class_name . $method;
+                }
+                if ( $parent instanceof \PhpParser\Node\Stmt\Function_ ) {
+                    return $parent->name instanceof \PhpParser\Node\Identifier ? $parent->name->toString() : '';
+                }
+                return __( 'Anonymous function', 'kiss-woo-shipping-debugger' );
+            }
+            $current = $parent;
+        }
+        return __( 'Global scope', 'kiss-woo-shipping-debugger' );
     }
 
     private function create_parser() {

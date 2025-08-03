@@ -295,6 +295,14 @@ class KISS_WSE_Debugger {
         // --- Custom Rules Scanner UI ---
         echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
         echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
+        echo '<style>
+        .kiss-toggle-control{display:inline-flex;background-color:#e0e0e0;border-radius:15px;padding:2px;border:1px solid #c9c9c9;}
+        .kiss-toggle-control input[type="radio"]{display:none;}
+        .kiss-toggle-control label{margin-bottom:0;padding:4px 12px;font-size:13px;line-height:1.5;cursor:pointer;border-radius:13px;transition:all 0.2s ease-in-out;color:#50575e;font-weight:400;}
+        .kiss-toggle-control input[type="radio"]:checked+label{background-color:#fff;color:#1d2327;box-shadow:0 1px 1px rgba(0,0,0,0.1);font-weight:600;}
+        .kiss-group-content{display:none;margin-top:20px;padding:15px;border:1px solid #ddd;}
+        .kiss-group-content.active{display:block;}
+        </style>';
         printf(
             '<form method="get" style="padding:1em;border:1px solid #c3c4c7;background:#fff;">
                 <input type="hidden" name="page" value="%1$s">
@@ -314,12 +322,34 @@ class KISS_WSE_Debugger {
             esc_html__( 'Path is relative to the active theme’s root directory (e.g., "woo-functions.php" or "inc/extra.php").', 'kiss-woo-shipping-debugger' )
         );
 
+        echo '<div class="kiss-toggle-control">
+            <input type="radio" id="group_mode_product" name="kiss_group_mode" value="product" checked>
+            <label for="group_mode_product">' . esc_html__( 'Product', 'kiss-woo-shipping-debugger' ) . '</label>
+            <input type="radio" id="group_mode_functional" name="kiss_group_mode" value="functional">
+            <label for="group_mode_functional">' . esc_html__( 'Functional', 'kiss-woo-shipping-debugger' ) . '</label>
+        </div>';
+
         try {
             $this->scan_and_render_custom_rules( $additional );
         } catch ( \Throwable $e ) {
             echo '<div class="notice notice-error"><pre>' . esc_html( $e->getMessage() ) . '</pre></div>';
             error_log( '[KISS Scanner] ' . $e->getMessage() );
         }
+
+        echo "<script>
+        document.addEventListener('DOMContentLoaded',function(){
+            const viewModeRadios=document.querySelectorAll('input[name=\"kiss_group_mode\"]');
+            const contents=document.querySelectorAll('.kiss-group-content');
+            function handleViewModeChange(){
+                const selected=document.querySelector('input[name=\"kiss_group_mode\"]:checked').value;
+                contents.forEach(content=>content.classList.remove('active'));
+                const active=document.getElementById(selected+'-content');
+                if(active){active.classList.add('active');}
+            }
+            viewModeRadios.forEach(radio=>radio.addEventListener('change',handleViewModeChange));
+            handleViewModeChange();
+        });
+        </script>";
 
         // --- UI Settings Export UI + Zones & Methods Preview ---
         echo '<hr/><h2>' . esc_html__( 'UI-Based Settings Export', 'kiss-woo-shipping-debugger' ) . '</h2>';
