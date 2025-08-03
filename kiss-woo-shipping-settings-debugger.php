@@ -181,10 +181,14 @@ class KISS_WSE_Debugger {
     /**
      * Constructor. Hooks into WordPress admin and ensures PHP-Parser is loaded.
      */
-    public function __construct() {
+    private ?\PhpParser\Parser $parser;
+
+    public function __construct(?\PhpParser\Parser $parser = null) {
         // Load PHP-Parser
         if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
             $this->maybe_require_parser_loader();
+        } else {
+            $this->parser = $parser ?? $this->create_parser();
         }
 
         add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
@@ -255,7 +259,7 @@ class KISS_WSE_Debugger {
 
         if ( $parser_loaded ) {
             try {
-                $parser = $this->create_parser();
+                $parser = $this->parser ?? $this->create_parser();
                 // Tiny parse test
                 $test_code = "<?php\nfunction _kiss_wse_test(){return 42;} _kiss_wse_test();";
                 $ast = $parser->parse( $test_code );
