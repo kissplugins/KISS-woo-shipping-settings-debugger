@@ -186,10 +186,19 @@ function kiss_wse_self_test_page_html() {
                     row.find('.test-message').html(message);
                     
                     runTest(index + 1); // Run the next test
-                }).fail(function() {
+                }).fail(function(jqXHR, textStatus, errorThrown) {
                     var icon = '<span style="color:red; font-size:1.5em; line-height:1;" class="dashicons dashicons-dismiss"></span>';
                     row.find('.test-icon').html(icon);
-                    row.find('.test-message').html('Failed to execute test (AJAX error).');
+
+                    var debugMsg = 'Failed to execute test (AJAX error).';
+                    if (textStatus || errorThrown) {
+                        debugMsg += ' ' + (textStatus || '') + (errorThrown ? ' - ' + errorThrown : '');
+                    }
+                    if (jqXHR && jqXHR.responseText) {
+                        debugMsg += '<br><pre style="white-space:pre-wrap;">' + $('<div/>').text(jqXHR.responseText).html() + '</pre>';
+                    }
+                    row.find('.test-message').html(debugMsg);
+                    console.error('KISS Shipping Debugger AJAX error:', textStatus, errorThrown, jqXHR);
                     $('#kiss-wse-run-self-tests').prop('disabled', false); // Stop on failure
                 });
             }
