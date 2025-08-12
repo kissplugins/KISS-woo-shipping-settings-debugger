@@ -33,3 +33,24 @@ Handling Closures: The parser would need to be ableto handle anonymous functions
 Conclusion:
 
 Despite the implementation challenges, the benefit is significant. Switching to a function-based grouping is the right direction for improving readability and abstraction. It moves the analysis from being a simple "list of things found" to a much more insightful "explanation of what the code does."
+
+## Three‑phase improvement plan (totals/coupons visibility and scanning)
+
+### Phase 1 — Diagnostics and UX quick wins
+- Totals Influence panel: summarize anything that can affect the final total (fees, discounts, custom totals filters) with line numbers and human‑readable explanations.
+- Detect and flag hooks that commonly override totals or discount math:
+  - `woocommerce_calculated_total`, `woocommerce_calculate_totals`, `woocommerce_cart_calculate_fees`
+  - Coupon‑related: `woocommerce_coupon_get_discount_amount`, `woocommerce_coupon_is_valid`, `woocommerce_applied_coupon`
+- Add “Possible totals override detected” warnings when code sets `$cart->set_total()` or returns a custom total from filters.
+- Small UX: link each detected hook to its function block; add copy‑as‑code for quick sharing in support chats.
+
+### Phase 2 — Function‑based grouping and Totals report
+- Implement the function‑centric grouping described below for clearer narratives.
+- Generate a dedicated “Totals Influence Report” that groups all actions/filters by the function that runs during totals calculation, and lists their effects in order of execution.
+- Extract key conditions (min subtotal, product/category checks, taxability flags, negative `add_fee` usage) once per function, then list resulting actions (e.g., “adds a -$10 fee before tax, taxable=no”).
+
+### Phase 3 — Coverage and automation
+- Optional scanning of selected plugin folders (with guardrails and path whitelists) in addition to themes.
+- WP‑CLI commands to run scans and export reports headlessly (CI, staging checks).
+- Scheduled exports (CSV/JSON) and scan summaries for recurring audits.
+- Unit tests for new detectors and grouping; performance benchmarks on large themes.
