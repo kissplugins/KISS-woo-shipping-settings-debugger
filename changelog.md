@@ -3,6 +3,15 @@
 Plugin sponsored & developed by Neochrome, Inc.
 
 ## 2.5.0
+
+## 2.5.1
+* **Security:** Fixed path traversal in scanner; enforced PHP-only and size limits; added memory headroom checks before parsing.
+* **Security:** Replaced wp_kses_post with esc_html for scanner descriptions derived from scanned files.
+* **Security:** Added CSV injection protection and security headers; implemented sanitized CSV export.
+* **Security:** Added rate limiting to CSV export handler (filterable window).
+* **Stability:** Regex ReDoS hardening in message formatting (truncate + lowered PCRE limits, restored after use; escaped alternations).
+* **QA:** Self-Test now includes a “CSV Injection Guard” test.
+
 * **Feature:** Added a "Grouping Type" toggle above the Custom Rules Scanner results, allowing reports to be viewed by Product (original behavior) or by the function/method containing each finding.
 
 ## 2.4.0

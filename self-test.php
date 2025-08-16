@@ -132,7 +132,8 @@ function kiss_wse_self_test_page_html() {
                 { id: 'dependency_check', name: 'Environment: Dependency Check' },
                 { id: 'summarize_method_helper', name: 'Helper: summarize_method()' },
                 { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
-                { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' }
+                { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' },
+                { id: 'csv_injection_guard', name: 'Security: CSV Injection Guard' },
             ];
 
             $('#kiss-wse-run-self-tests').on('click', function() {
@@ -145,7 +146,7 @@ function kiss_wse_self_test_page_html() {
                     '<th>Test Name</th>' +
                     '<th>Result</th>' +
                     '</tr></thead><tbody></tbody></table>');
-                
+
                 runTest(0); // Start the test sequence
             });
 
@@ -184,7 +185,7 @@ function kiss_wse_self_test_page_html() {
 
                     row.find('.test-icon').html(icon);
                     row.find('.test-message').html(message);
-                    
+
                     runTest(index + 1); // Run the next test
                 }).fail(function() {
                     var icon = '<span style="color:red; font-size:1.5em; line-height:1;" class="dashicons dashicons-dismiss"></span>';
@@ -237,9 +238,9 @@ function kiss_wse_run_single_test_callback() {
                     return $default;
                 }
             };
-            
+
             $summary = $main_class->summarize_method($mock_flat_rate);
-            
+
             $pass = (strpos($summary, 'Standard Shipping') !== false) &&
                     (strpos($summary, 'cost') !== false) &&
                     (strpos($summary, '15.00') !== false);
@@ -267,7 +268,7 @@ function kiss_wse_run_single_test_callback() {
             $mock_zone = new class {
                 public function get_zone_name() { return 'Mock Zone'; }
                 public function get_zone_locations() { return []; }
-                public function get_shipping_methods() { 
+                public function get_shipping_methods() {
                     $method = new class {
                         public $id = 'free_shipping';
                         public $enabled = 'yes';
@@ -275,10 +276,10 @@ function kiss_wse_run_single_test_callback() {
                         public $method_title = 'Free Shipping';
                         public function get_option($key, $default='') { if ($key === 'requires') return ''; return $default; }
                     };
-                    return [ $method ]; 
+                    return [ $method ];
                 }
             };
-            
+
             list( , , $warnings_html ) = $main_class->collect_zone_rows_from_data( [ $mock_zone ] );
             if (strpos($warnings_html, 'Free Shipping has no requirement') !== false) {
                 wp_send_json_success( [ 'message' => 'Correctly identified "Free Shipping with no requirement" issue using mock data.' ] );
@@ -297,7 +298,7 @@ function kiss_wse_run_single_test_callback() {
                 if ( !is_dir($child_theme_inc_dir) ) {
                     wp_mkdir_p($child_theme_inc_dir);
                 }
-                
+
                 $test_file_path = $child_theme_inc_dir . '/kiss-wse-self-test-rules.php';
                 $test_code = <<<PHP
 <?php
@@ -311,7 +312,7 @@ function kiss_wse_shipping_restrictions_test(\$rates, \$package, \$errors) {
         'WI' => 'Wisconsin',
     ];
     \$state = 'WI'; // mock
-    
+
     // Test 1: Statically defined array in a condition
     if (isset(\$restricted_states[\$state])) {
         unset(\$rates['free_shipping:1']);
@@ -339,7 +340,7 @@ PHP;
                 $checks = [
                     // Test 1 Check: `unset` rule with resolved array in condition
                     'when the location is one of: <strong>Alabama, Arkansas, Indiana, Vermont, Wisconsin</strong>',
-                    
+
                     // Test 2 Check: `errors->add` rule with resolved array in the message, including `<strong>` tags on Kratom and the first state.
                     'Adds a checkout error message: “We cannot ship <strong>Kratom</strong> to <strong>Alabama</strong>, Arkansas, Indiana, Vermont, Wisconsin.”',
 
@@ -353,7 +354,7 @@ PHP;
                         $failed_checks[] = $check;
                     }
                 }
-                
+
                 if (empty($failed_checks)) {
                     wp_send_json_success( [ 'message' => 'Successfully detected rules and resolved array variables.' ] );
                 } else {
@@ -367,6 +368,20 @@ PHP;
                 if ($test_file_path && file_exists($test_file_path)) {
                     unlink($test_file_path);
                 }
+            }
+        case 'csv_injection_guard':
+            $inputs = ['=1+1','+foo','-bar','@SUM(A1:A2)','hello','123'];
+            $fallback = function($v){ $s=(string)$v; return ($s!=='' && in_array($s[0],['=','+','-','@'],true)) ? "'".$s : $s; };
+            $ok = 0; $fail = 0; $details = [];
+            foreach ($inputs as $in) {
+                $out = function_exists('kiss_wse_csv_sanitize_cell') ? kiss_wse_csv_sanitize_cell($in) : $fallback($in);
+                $exp = $fallback($in);
+                if ($out === $exp) { $ok++; } else { $fail++; $details[] = "$in => $out (expected $exp)"; }
+            }
+            if ($fail === 0) {
+                wp_send_json_success( [ 'message' => "CSV Injection Guard: PASS ($ok ok)" ] );
+            } else {
+                wp_send_json_error( [ 'message' => "CSV Injection Guard: FAIL ($ok ok, $fail fail)\n" . implode('\n', $details) ] );
             }
             break;
 
@@ -385,7 +400,7 @@ function kiss_wse_update_test_timestamp_callback() {
     if ( ! current_user_can( 'manage_woocommerce' ) ) {
         wp_send_json_error( [ 'message' => 'Permission denied.' ] );
     }
-    
+
     $timestamp = current_time( 'timestamp' );
     update_option( 'kiss_wse_tests_last_run', $timestamp );
 

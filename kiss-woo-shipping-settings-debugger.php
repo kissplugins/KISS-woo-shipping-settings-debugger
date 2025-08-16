@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     2.5.0
+ * Version:     2.5.1
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -15,6 +15,21 @@ define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 require_once __DIR__ . '/preview-trait.php';
 require_once __DIR__ . '/scanner-trait.php';
 require_once __DIR__ . '/self-test.php';
+
+
+// Shared helper: sanitize a CSV cell to prevent formula injection
+if ( ! function_exists( 'kiss_wse_csv_sanitize_cell' ) ) {
+    function kiss_wse_csv_sanitize_cell( $value ) {
+        $s = (string) $value;
+        if ( $s !== '' ) {
+            $first = $s[0];
+            if ( $first === '=' || $first === '+' || $first === '-' || $first === '@' ) {
+                return "'" . $s;
+            }
+        }
+        return $s;
+    }
+}
 
 
 add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
@@ -373,19 +388,6 @@ class KISS_WSE_Debugger {
         header( 'X-Content-Type-Options: nosniff' );
         header( 'X-Frame-Options: DENY' );
 
-        // CSV injection protection for values written via fputcsv
-        if ( ! function_exists( 'kiss_wse_csv_sanitize_cell' ) ) {
-            function kiss_wse_csv_sanitize_cell( $value ) {
-                $s = (string) $value;
-                if ( $s !== '' ) {
-                    $first = $s[0];
-                    if ( $first === '=' || $first === '+' || $first === '-' || $first === '@' ) {
-                        return "'" . $s;
-                    }
-                }
-                return $s;
-            }
-        }
 
         nocache_headers();
         header( 'Content-Type: text/csv; charset=utf-8' );

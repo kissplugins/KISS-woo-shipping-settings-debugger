@@ -222,6 +222,17 @@ trait KISS_WSE_Scanner {
         foreach ( $product_groups as $product => $findings ) {
             printf( '<h4 style="color: red;"><strong>%s</strong></h4>', esc_html( $product ) );
             echo '<ul>';
+
+	        // ReDoS hardening: truncate message and temporarily lower PCRE limits
+	        $max_len = (int) apply_filters( 'kiss_wse_format_msg_max_len', 1000 );
+	        if ( $max_len > 0 && strlen( $message ) > $max_len ) {
+	            $message = substr( $message, 0, $max_len );
+	        }
+	        $__prev_pcre_bt  = ini_get( 'pcre.backtrack_limit' );
+	        $__prev_pcre_rec = ini_get( 'pcre.recursion_limit' );
+	        @ini_set( 'pcre.backtrack_limit', '100000' );
+	        @ini_set( 'pcre.recursion_limit', '100000' );
+
             foreach ( $findings as $finding ) {
                 $line     = (int) $finding['node']->getLine();
                 $filename = basename( $finding['file'] );
@@ -299,6 +310,16 @@ trait KISS_WSE_Scanner {
      * Helper function to apply bolding rules to error messages.
      */
     private function format_error_message( string $message ): string {
+        // ReDoS hardening: truncate and adjust PCRE limits just for formatting
+        $max_fmt_len = (int) apply_filters( 'kiss_wse_format_msg_max_len', 1000 );
+        if ( $max_fmt_len > 0 && strlen( $message ) > $max_fmt_len ) {
+            $message = substr( $message, 0, $max_fmt_len );
+        }
+        $prev_bt  = ini_get( 'pcre.backtrack_limit' );
+        $prev_rec = ini_get( 'pcre.recursion_limit' );
+        @ini_set( 'pcre.backtrack_limit', '100000' );
+        @ini_set( 'pcre.recursion_limit', '100000' );
+
         // 1. Bold specific, high-priority keywords
         $message = str_ireplace(
             ['Kratom'], // Oregon is handled by the state rule below
@@ -320,9 +341,14 @@ trait KISS_WSE_Scanner {
             $message
         );
 
+
+        // Restore PCRE limits
+        if ( $prev_bt !== false ) { @ini_set( 'pcre.backtrack_limit', (string) $prev_bt ); }
+        if ( $prev_rec !== false ) { @ini_set( 'pcre.recursion_limit', (string) $prev_rec ); }
+
         // 3. Bold state names that appear after "to" or "for"
         $states = ['Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'];
-        $states_pattern = implode('|', $states);
+        $states_pattern = implode('|', array_map('preg_quote', $states));
         $message = preg_replace(
             "/\b(to|for)\s+({$states_pattern})\b/i",
             '$1 <strong>$2</strong>',

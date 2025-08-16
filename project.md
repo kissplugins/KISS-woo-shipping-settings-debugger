@@ -54,7 +54,7 @@ $ast = $parser->parse( $code );
 
 ## Priority 4 (MEDIUM)
 
-### 4.1 Potential ReDoS in Regex Patterns
+### 4.1 Potential ReDoS in Regex Patterns — Status: Fixed
 **Location:** `scanner-trait.php`, format_error_message() method, lines 225-242
 **Issue:** Complex regex patterns without anchors could be vulnerable to ReDoS:
 ```php
