@@ -1,12 +1,12 @@
-=== KISS Woo Shipping Settings Debugger ===
+=== KISS Woo Shipping Settings Debugger ===  
 Contributors: KISS Plugins  
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple  
 Requires at least: 6.0  
 Tested up to: 6.8  
-Stable tag: 2.5.1
+Stable tag: 2.5.1  
 Requires PHP: 7.4  
 License: GPLv2 or later  
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
+License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
 A simple, robust tool for store managers and developers to **audit, preview, and export** WooCommerce shipping settings—and to **scan custom theme code** for shipping logic via PHP-Parser (AST).
 
