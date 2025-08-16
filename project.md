@@ -2,7 +2,7 @@
 
 ## Priority 1 (CRITICAL - Immediate Action Required)
 
-### 1.1 Path Traversal Vulnerability in Scanner
+### 1.1 Path Traversal Vulnerability in Scanner — Status: Fixed
 **Location:** `scanner-trait.php`, lines 24-33
 **Issue:** While there is a `realpath()` check, the path validation is insufficient. The code only checks if the path starts with the base directory but doesn't prevent symlink attacks or relative path manipulation.
 ```php
@@ -15,7 +15,7 @@ if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && !in_array(
 
 ## Priority 2 (HIGH - Address Soon)
 
-### 2.1 Unescaped Dynamic Content in Admin Output
+### 2.1 Unescaped Dynamic Content in Admin Output — Status: Fixed
 **Location:** `scanner-trait.php`, line 187
 **Issue:** The `wp_kses_post()` function is used for scanner output which may contain user-controlled data from scanned files:
 ```php
@@ -28,7 +28,7 @@ printf('<li><strong>%s</strong> — %s %s</li>',
 **Risk:** If scanned PHP files contain malicious strings that get parsed and displayed, they could execute JavaScript in the admin context.
 **Fix:** Use `esc_html()` instead of `wp_kses_post()` for dynamic content from scanned files.
 
-### 2.2 CSV Injection Vulnerability
+### 2.2 CSV Injection Vulnerability — Status: Fixed
 **Location:** `kiss-woo-shipping-settings-debugger.php`, handle_export() method
 **Issue:** The CSV export doesn't sanitize data that could contain formula injection attacks.
 **Risk:** Exported CSVs could contain malicious formulas (=cmd|'/c calc'!A1) that execute when opened in spreadsheet applications.
@@ -36,7 +36,7 @@ printf('<li><strong>%s</strong> — %s %s</li>',
 
 ## Priority 3 (MEDIUM-HIGH)
 
-### 3.1 Unbounded File Parsing with No Memory Limits
+### 3.1 Unbounded File Parsing with No Memory Limits — Status: Fixed
 **Location:** `scanner-trait.php`, scan_and_render_custom_rules() method
 **Issue:** The AST parser reads entire files into memory without size checks:
 ```php

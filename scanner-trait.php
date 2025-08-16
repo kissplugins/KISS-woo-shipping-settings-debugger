@@ -42,6 +42,33 @@ trait KISS_WSE_Scanner {
                 if ( $invalid ) {
                     echo '<div class="notice notice-warning"><p>' . esc_html__( 'Invalid path provided.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                 } else {
+
+	            // Enforce extension, size limit, and memory headroom before parsing
+	            clearstatcache(true, $file);
+	            $ext = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
+	            if ( $ext !== 'php' ) {
+	                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Skipped: Only PHP files can be scanned.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+	                continue;
+	            }
+	            $size = @filesize( $file );
+	            if ( $size === false ) {
+	                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Skipped: Unable to read file size.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+	                continue;
+	            }
+	            if ( $size > $max_size_bytes ) {
+	                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Skipped: File too large to scan. Reduce size or adjust the limit via filter.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+	                continue;
+	            }
+	            $min_free = (int) apply_filters( 'kiss_wse_scanner_min_free_memory', 32 * 1024 * 1024 ); // 32 MB
+	            $limit_bytes = $this->bytes_from_php_ini_val( ini_get( 'memory_limit' ) );
+	            if ( $limit_bytes > 0 ) {
+	                $free_bytes = $limit_bytes - memory_get_usage( true );
+	                if ( $free_bytes < ( $min_free + (int) $size * 2 ) ) {
+	                    echo '<div class="notice notice-warning"><p>' . esc_html__( 'Skipped: Not enough memory headroom to safely parse this file.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+	                    continue;
+	                }
+	            }
+
                     // Build candidate path under base without following symlinks
                     $base_root  = rtrim( $base_real, '/\\' );
                     $candidate  = wp_normalize_path( $base_root . '/' . implode( '/', $segments ) );
@@ -822,6 +849,23 @@ trait KISS_WSE_Scanner {
             return $expr->name->toString();
         }
         return $this->expr_placeholder( $expr, $collected_arrays, $current_file );
+    }
+
+    /**
+     * Convert PHP ini memory values like "128M" or "1G" to bytes.
+     */
+    private function bytes_from_php_ini_val( $val ): int {
+        $v = trim( (string) $val );
+        if ( $v === '' || $v === '-1' ) return -1; // -1 means unlimited
+        $last = strtolower( $v[strlen($v)-1] );
+        $num = (int) $v;
+        switch ( $last ) {
+            case 'g': $num *= 1024;
+            case 'm': $num *= 1024;
+            case 'k': $num *= 1024;
+        }
+        return $num;
+    }
     }
 
     private function condition_mentions_free_shipping( \PhpParser\Node $node ): bool {

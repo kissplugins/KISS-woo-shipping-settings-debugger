@@ -49,7 +49,7 @@ trait KISS_WSE_Testable {
             // Since this is a mock test, we don't need the full HTML rendering of locations
             // $locations_html = $this->format_zone_locations($zone, 6);
             $methods = $zone->get_shipping_methods();
-            
+
             $enabled = 0; $disabled = 0;
             foreach ($methods as $m) {
                 if ('yes' === $m->enabled) $enabled++; else $disabled++;
@@ -72,7 +72,7 @@ trait KISS_WSE_Testable {
             if (!empty($zone_issues)) {
                 $warnings[] = sprintf('<strong>%s</strong>: %s', esc_html($zone_name), esc_html(implode('; ', $zone_issues)));
             }
-            
+
             $total_rows++;
             if ($total_rows >= $cap) break;
         }
@@ -107,7 +107,7 @@ trait KISS_WSE_Testable {
 
         $ast    = $parser->parse( $code );
         $trav   = new \PhpParser\NodeTraverser();
-        
+
         // The visitor chain MUST match the main scanner for tests to be accurate.
         $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
         $array_collector = new \KISSShippingDebugger\ArrayCollectorVisitor();
@@ -118,7 +118,7 @@ trait KISS_WSE_Testable {
 
         // Build the data structures needed by the describe_node function.
         $collected_arrays = [ $file_path => $array_collector->getArraysByScope() ];
-        
+
         $sections = [
             'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
             'addFees'     => $rate_visitor->getAddFeeNodes(),
@@ -132,18 +132,18 @@ trait KISS_WSE_Testable {
                 $all_findings[] = ['file' => $file_path, 'key' => $key, 'node' => $node];
             }
         }
-        
+
         // Render the findings using the full-featured describe_node method.
         if ( ! empty( $all_findings ) ) {
             echo '<ul>';
             foreach ( $all_findings as $finding ) {
                 $desc = $this->describe_node( $finding['key'], $finding['node'], $collected_arrays, $finding['file'] );
-                // Use wp_kses_post to allow tags in test output
-                printf( '<li>%s</li>', wp_kses_post( $desc ) );
+                // Output as plain text to avoid any XSS risk in admin
+                printf( '<li>%s</li>', esc_html( $desc ) );
             }
             echo '</ul>';
         }
-        
+
         return ob_get_clean();
     }
 }
@@ -356,12 +356,92 @@ class KISS_WSE_Debugger {
         check_admin_referer( $this->page_slug, 'wse_nonce' );
 
         // Prepare CSV streaming
+        // Security headers
+        header( 'X-Content-Type-Options: nosniff' );
+        header( 'X-Frame-Options: DENY' );
+
+        // CSV injection protection for values written via fputcsv
+        if ( ! function_exists( 'kiss_wse_csv_sanitize_cell' ) ) {
+            function kiss_wse_csv_sanitize_cell( $value ) {
+                $s = (string) $value;
+                if ( $s !== '' ) {
+                    $first = $s[0];
+                    if ( $first === '=' || $first === '+' || $first === '-' || $first === '@' ) {
+                        return "'" . $s;
+                    }
+                }
+                return $s;
+            }
+        }
+
         nocache_headers();
         header( 'Content-Type: text/csv; charset=utf-8' );
 
         $host     = parse_url( home_url(), PHP_URL_HOST );
         $filename = sanitize_file_name( sprintf( '%s-shipping-%s.csv', (string) $host, wp_date( 'Y-m-d-His' ) ) );
         header( 'Content-Disposition: attachment; filename=' . $filename );
+
+
+	    /**
+	     * Output a sanitized CSV export of WooCommerce shipping zones and methods.
+	     * Cells are protected against CSV injection by prefixing leading =,+,-,@.
+	     */
+	    public function output_csv(): void {
+	        if ( ! class_exists( 'WC_Shipping_Zones' ) ) {
+	            $out = fopen( 'php://output', 'w' );
+	            if ( $out ) {
+	                fputcsv( $out, array_map( 'kiss_wse_csv_sanitize_cell', [ 'notice', 'WooCommerce shipping is not available.' ] ) );
+	                fclose( $out );
+	            }
+	            return;
+	        }
+
+	        $out = fopen( 'php://output', 'w' );
+	        if ( ! $out ) return;
+
+	        // Header row
+	        fputcsv( $out, array_map( 'kiss_wse_csv_sanitize_cell', [ 'Zone', 'Enabled', 'Disabled', 'Locations', 'Methods' ] ) );
+
+	        // Build a list of zone IDs (add 0 for Rest of the world)
+	        $zone_rows = \WC_Shipping_Zones::get_zones();
+	        $zone_ids  = [];
+	        foreach ( $zone_rows as $zr ) {
+	            if ( isset( $zr['zone_id'] ) ) { $zone_ids[] = (int) $zr['zone_id']; }
+	        }
+	        $zone_ids[] = 0; // Rest of the world
+
+	        foreach ( $zone_ids as $zone_id ) {
+	            $zone = new \WC_Shipping_Zone( (int) $zone_id );
+	            $zone_name = (string) $zone->get_zone_name();
+
+	            // Locations CSV (codes only)
+	            $locs = $zone->get_zone_locations();
+	            $loc_parts = [];
+	            foreach ( $locs as $loc ) {
+	                $code = isset( $loc->code ) ? $loc->code : ( $loc['code'] ?? '' );
+	                $loc_parts[] = (string) $code;
+	            }
+	            $locations_csv = implode( ', ', $loc_parts );
+
+	            // Methods and counts
+	            $methods = $zone->get_shipping_methods();
+	            $enabled = 0; $disabled = 0;
+	            $method_titles = [];
+	            foreach ( $methods as $m ) {
+	                $is_enabled = ( 'yes' === ( $m->enabled ?? 'no' ) );
+	                if ( $is_enabled ) { $enabled++; } else { $disabled++; }
+	                $title = isset( $m->title ) ? (string) $m->title : ( isset( $m->method_title ) ? (string) $m->method_title : (string) ( $m->id ?? '' ) );
+	                $method_titles[] = $title;
+	            }
+	            $methods_csv = implode( ' | ', $method_titles );
+
+	            $row = [ $zone_name, (string) $enabled, (string) $disabled, $locations_csv, $methods_csv ];
+	            // Sanitize for CSV injection and stream
+	            fputcsv( $out, array_map( 'kiss_wse_csv_sanitize_cell', $row ) );
+	        }
+
+	        fclose( $out );
+	    }
 
         /**
          * Stream CSV.
