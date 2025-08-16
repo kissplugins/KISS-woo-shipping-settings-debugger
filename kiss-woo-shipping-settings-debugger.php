@@ -355,6 +355,19 @@ class KISS_WSE_Debugger {
         // Nonce verification
         check_admin_referer( $this->page_slug, 'wse_nonce' );
 
+
+        // Rate limiting: throttle export requests per user/IP
+        $window = (int) apply_filters( 'kiss_wse_export_rate_limit_window', 60 ); // seconds
+        if ( $window > 0 ) {
+            $user_id    = get_current_user_id();
+            $identifier = $user_id ? ( 'user_' . $user_id ) : ( 'ip_' . md5( $_SERVER['REMOTE_ADDR'] ?? '' ) );
+            $key        = 'kiss_wse_export_rl_' . $identifier;
+            if ( get_transient( $key ) ) {
+                wp_die( esc_html__( 'Please wait before running another export.', 'kiss-woo-shipping-debugger' ), 429 );
+            }
+            set_transient( $key, 1, $window );
+        }
+
         // Prepare CSV streaming
         // Security headers
         header( 'X-Content-Type-Options: nosniff' );

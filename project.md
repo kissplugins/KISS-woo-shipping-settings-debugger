@@ -46,7 +46,7 @@ $ast = $parser->parse( $code );
 **Risk:** Large or maliciously crafted PHP files could cause memory exhaustion.
 **Fix:** Add file size limits and memory usage monitoring.
 
-### 3.2 Missing Rate Limiting on Export Function
+### 3.2 Missing Rate Limiting on Export Function — Status: Fixed
 **Location:** `kiss-woo-shipping-settings-debugger.php`, handle_export() method
 **Issue:** No rate limiting on CSV export functionality.
 **Risk:** Repeated export requests could cause database strain and resource exhaustion.
