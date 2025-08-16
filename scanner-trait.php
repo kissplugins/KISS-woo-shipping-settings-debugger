@@ -6,33 +6,84 @@ trait KISS_WSE_Scanner {
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
-    
+
         // --- 1. GATHER FILES ---
         $files_to_scan = [];
         $default_file = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc/shipping-restrictions.php' );
         if ( file_exists($default_file) ) {
             $files_to_scan[] = $default_file;
         }
-    
+
         $base_dir  = wp_normalize_path( get_stylesheet_directory() );
         $base_real = realpath( $base_dir );
-    
+
+
+        // Max file size (bytes) allowed for scanning; adjustable via filter
+        $max_size_bytes = (int) apply_filters( 'kiss_wse_scanner_max_file_size', 1048576 );
+
         if ( $additional && $base_real ) {
-            $rel   = ltrim( wp_normalize_path( $additional ), '/\\' );
-            $try   = wp_normalize_path( $base_real . DIRECTORY_SEPARATOR . $rel );
-            $real  = realpath( $try );
-    
-            if ( $real && is_file($real) ) {
-                $real_norm = wp_normalize_path( $real );
-                $base_norm = wp_normalize_path( $base_real );
-                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && !in_array($real, $files_to_scan) ) {
-                    $files_to_scan[] = $real;
-                }
+            $rel_raw = wp_normalize_path( $additional );
+
+            // Basic poison null byte check
+            if ( strpos( $rel_raw, "\0" ) !== false ) {
+                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Invalid path provided.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
             } else {
-                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                // Normalize and ensure it is a relative path (no leading slashes)
+                $rel = ltrim( $rel_raw, '/\\' );
+
+                // Reject traversal and suspicious segments (., .., streams)
+                $segments = array_values( array_filter( explode( '/', $rel ), 'strlen' ) );
+                $invalid  = false;
+                foreach ( $segments as $seg ) {
+                    if ( $seg === '.' || $seg === '..' ) { $invalid = true; break; }
+                    if ( strpos( $seg, ':' ) !== false ) { $invalid = true; break; }
+                }
+
+                if ( $invalid ) {
+                    echo '<div class="notice notice-warning"><p>' . esc_html__( 'Invalid path provided.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                } else {
+                    // Build candidate path under base without following symlinks
+                    $base_root  = rtrim( $base_real, '/\\' );
+                    $candidate  = wp_normalize_path( $base_root . '/' . implode( '/', $segments ) );
+
+                    // Deny symlinks in any path segment
+                    $walk = $base_root;
+                    foreach ( $segments as $seg ) {
+                        $walk = $walk . DIRECTORY_SEPARATOR . $seg;
+                        if ( is_link( $walk ) ) { $invalid = true; break; }
+                    }
+
+                    if ( $invalid ) {
+                        echo '<div class="notice notice-warning"><p>' . esc_html__( 'Symlinked paths are not allowed.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                    } elseif ( is_file( $candidate ) ) {
+                        // Boundary check with slash guard to avoid prefix tricks
+                        $cand_norm = wp_normalize_path( $candidate );
+                        $base_norm = rtrim( wp_normalize_path( $base_real ), '/\\' ) . '/';
+                        if ( strpos( $cand_norm, $base_norm ) === 0 ) {
+                            // Enforce .php extension only
+                            if ( strtolower( pathinfo( $candidate, PATHINFO_EXTENSION ) ) !== 'php' ) {
+                                echo '<div class="notice notice-warning"><p>' . esc_html__( 'Only PHP files can be scanned.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                            } else {
+                                // Enforce size limit
+                                $size = @filesize( $candidate );
+                                if ( $size === false || $size > $max_size_bytes ) {
+                                    echo '<div class="notice notice-warning"><p>' . esc_html__( 'File too large to scan. Reduce size or adjust the limit via filter.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                                } else {
+                                    if ( ! in_array( $candidate, $files_to_scan, true ) ) {
+                                        $files_to_scan[] = $candidate;
+                                    }
+                                }
+                            }
+                        } else {
+                            echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file must be inside the active theme directory.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                        }
+                    } else {
+                        echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                    }
+                }
             }
         }
-    
+
         // --- 2. COLLECT ALL FINDINGS FROM ALL FILES ---
         $all_findings = [];
         $collected_arrays = []; // Master lookup for all arrays found in all files.
@@ -43,7 +94,7 @@ trait KISS_WSE_Scanner {
                 echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan file:', 'kiss-woo-shipping-debugger' ) . ' ' . esc_html(wp_make_link_relative($file)) . '</em></p>';
                 continue;
             }
-    
+
             $code   = file_get_contents( $file );
             $parser = $this->create_parser();
             $ast    = $parser->parse( $code );
@@ -59,7 +110,7 @@ trait KISS_WSE_Scanner {
 
             // Store the collected arrays for this file.
             $collected_arrays[$file] = $array_collector->getArraysByScope();
-    
+
             $sections = [
                 'errors'      => $rate_visitor->getErrorAddNodes(),
                 'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
@@ -69,7 +120,7 @@ trait KISS_WSE_Scanner {
                 'newRates'    => $rate_visitor->getNewRateNodes(),
                 'addFees'     => $rate_visitor->getAddFeeNodes(),
             ];
-    
+
             foreach($sections as $key => $nodes) {
                 foreach($nodes as $node) {
                     $all_findings[] = [
@@ -80,7 +131,7 @@ trait KISS_WSE_Scanner {
                 }
             }
         }
-    
+
         // --- 3. GROUP FINDINGS ---
         $product_groups  = [];
         $function_groups = [];
@@ -234,7 +285,7 @@ trait KISS_WSE_Scanner {
             '<strong>$1</strong> $2',
             $message
         );
-        
+
         // ADDED: Handle product names that appear before "or"
         $message = preg_replace(
             '/(\b[\w-]+(?:\s[\w-]+)?)\s+(or)\b/i',
@@ -650,7 +701,7 @@ trait KISS_WSE_Scanner {
                 $var_name  = $array_var_node->name;
                 $scope_key = $this->getCurrentScopeKey( $expr );
                 $file_arrays = $collected_arrays[$current_file] ?? [];
-                
+
                 if ( isset( $file_arrays[$scope_key][$var_name] ) ) {
                     $array_data = $file_arrays[$scope_key][$var_name];
                     if( is_array($array_data) && !empty($array_data) ) {
@@ -840,7 +891,7 @@ trait KISS_WSE_Scanner {
 
         // Use only string values, filter out others.
         $string_items = array_filter($items, 'is_string');
-        
+
         if ( empty($string_items) ) {
             return __( 'an empty list', 'kiss-woo-shipping-debugger' );
         }
