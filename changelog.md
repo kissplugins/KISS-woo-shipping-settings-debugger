@@ -2,6 +2,9 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.5.1
+* **Enhancement:** AJAX self-test failures now display detailed status information and server responses to aid debugging of coupon-related checks.
+
 ## 2.5.0
 * **Feature:** Added a "Grouping Type" toggle above the Custom Rules Scanner results, allowing reports to be viewed by Product (original behavior) or by the function/method containing each finding.
 
