@@ -243,13 +243,17 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
      * Check if a node is geographically relevant by examining surrounding context
      */
     private function isGeographicallyRelevant(Node $node): bool {
-        // Look for geographical keywords in the surrounding context
+        // Simplified keyword list for better performance
         $geographicalKeywords = [
             'country', 'state', 'city', 'zip', 'postal', 'address',
-            'location', 'region', 'province', 'territory', 'shipping_country',
-            'shipping_state', 'shipping_city', 'shipping_postcode',
-            'billing_country', 'billing_state', 'billing_city', 'billing_postcode',
-            'destination', 'origin', 'zone', 'US', 'CA', 'UK', 'AU'
+            'location', 'shipping', 'billing', 'destination', 'zone',
+            // Product-based geographical restrictions
+            'kratom', 'amanita', 'thc', 'cbd', 'cannabis',
+            'product_cat', 'product_id', 'has_term', 'get_cart',
+            // Common shipping restriction patterns
+            'rates', 'package', 'unset', 'remove', 'restrict', 'checkout', 'error',
+            // Key state abbreviations
+            'US', 'CA', 'UK', 'AU', 'alabama', 'california', 'texas', 'florida', 'oregon'
         ];
 
         return $this->nodeContainsKeywords($node, $geographicalKeywords);
@@ -259,11 +263,14 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
      * Check if a node is payment method relevant
      */
     private function isPaymentRelevant(Node $node): bool {
-        // Look for payment method keywords
+        // Simplified payment keywords for better performance
         $paymentKeywords = [
-            'payment', 'gateway', 'amex', 'american_express', 'visa', 'mastercard',
-            'paypal', 'stripe', 'credit_card', 'debit', 'payment_method',
-            'payment_gateway', 'available_gateways', 'payment_methods'
+            'payment', 'gateway', 'amex', 'american_express', 'paypal', 'stripe',
+            'payment_method', 'available_gateways', 'gateways',
+            'checkout', 'billing',
+            // Product-based payment restrictions
+            'kratom', 'amanita', 'thc', 'cbd', 'cannabis',
+            'product_cat', 'has_term', 'get_cart'
         ];
 
         return $this->nodeContainsKeywords($node, $paymentKeywords);
@@ -282,19 +289,8 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
             }
         }
 
-        // Also check parent nodes for context
-        if (property_exists($node, 'getAttribute') && $node->getAttribute('parent')) {
-            $parent = $node->getAttribute('parent');
-            if ($parent) {
-                $parentString = $this->nodeToString($parent);
-                foreach ($keywords as $keyword) {
-                    if (stripos($parentString, $keyword) !== false) {
-                        return true;
-                    }
-                }
-            }
-        }
-
+        // Skip parent checking to avoid performance issues and potential infinite loops
+        // The current node string should be sufficient for most cases
         return false;
     }
 
@@ -302,30 +298,34 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
      * Convert a node to a string representation for keyword searching
      */
     private function nodeToString(Node $node): string {
-        // Simple string representation - could be enhanced
-        if (method_exists($node, '__toString')) {
-            return (string) $node;
-        }
-
-        // For basic nodes, try to extract meaningful content
+        // For basic nodes, try to extract meaningful content quickly
         $content = '';
+
         if ($node instanceof String_) {
-            $content .= $node->value;
+            $content = $node->value;
         } elseif ($node instanceof Variable && is_string($node->name)) {
-            $content .= $node->name;
+            $content = $node->name;
         } elseif ($node instanceof Identifier) {
-            $content .= $node->name;
+            $content = $node->name;
+        } else {
+            // For other nodes, use a simple approach
+            $content = get_class($node);
         }
 
-        // Add any string arguments
+        // Add any string arguments (limit to first 3 for performance)
         if (property_exists($node, 'args') && is_array($node->args)) {
+            $argCount = 0;
             foreach ($node->args as $arg) {
+                if ($argCount >= 3) break; // Limit for performance
                 if (isset($arg->value) && $arg->value instanceof String_) {
                     $content .= ' ' . $arg->value->value;
                 }
+                $argCount++;
             }
         }
 
-        return strtolower($content);
+        // Limit string length for performance
+        $result = strtolower($content);
+        return strlen($result) > 500 ? substr($result, 0, 500) : $result;
     }
 }

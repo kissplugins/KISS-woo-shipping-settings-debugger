@@ -231,19 +231,22 @@ trait KISS_WSE_Preview {
 
             switch ( $type ) {
                 case 'country':
-                    $parts[] = esc_html( $code );
+                    $country_name = $this->get_country_name( $code );
+                    $parts[] = '<strong>' . esc_html( $country_name ) . '</strong>';
                     break;
                 case 'state':
-                    $parts[] = esc_html( $code ); // e.g., US:CA
+                    $state_name = $this->get_state_name( $code );
+                    $parts[] = '<strong>' . esc_html( $state_name ) . '</strong>';
                     break;
                 case 'continent':
-                    $parts[] = esc_html( $code ); // e.g., EU
+                    $continent_name = $this->get_continent_name( $code );
+                    $parts[] = '<strong>' . esc_html( $continent_name ) . '</strong>';
                     break;
                 case 'postcode':
-                    $parts[] = esc_html( $code );
+                    $parts[] = '<strong>' . esc_html( $code ) . '</strong>';
                     break;
                 default:
-                    $parts[] = esc_html( (string) $code );
+                    $parts[] = '<strong>' . esc_html( (string) $code ) . '</strong>';
                     break;
             }
         }
@@ -257,7 +260,63 @@ trait KISS_WSE_Preview {
         return $out;
     }
 
-    private function summarize_method( $method ): string {
+    /**
+     * Get human-readable country name from country code.
+     */
+    private function get_country_name( string $code ): string {
+        if ( ! class_exists( 'WC_Countries' ) ) {
+            return $code;
+        }
+
+        $countries = new \WC_Countries();
+        $country_name = $countries->get_countries()[ $code ] ?? $code;
+        return $country_name;
+    }
+
+    /**
+     * Get human-readable state name from state code (format: COUNTRY:STATE).
+     */
+    private function get_state_name( string $code ): string {
+        if ( ! class_exists( 'WC_Countries' ) ) {
+            return $code;
+        }
+
+        $parts = explode( ':', $code );
+        if ( count( $parts ) !== 2 ) {
+            return $code;
+        }
+
+        $country_code = $parts[0];
+        $state_code = $parts[1];
+
+        $countries = new \WC_Countries();
+        $states = $countries->get_states( $country_code );
+
+        if ( empty( $states ) || ! isset( $states[ $state_code ] ) ) {
+            return $code;
+        }
+
+        $country_name = $countries->get_countries()[ $country_code ] ?? $country_code;
+        $state_name = $states[ $state_code ];
+
+        return $state_name . ', ' . $country_name;
+    }
+
+    /**
+     * Get human-readable continent name from continent code.
+     */
+    private function get_continent_name( string $code ): string {
+        if ( ! class_exists( 'WC_Countries' ) ) {
+            return $code;
+        }
+
+        $countries = new \WC_Countries();
+        $continents = $countries->get_continents();
+
+        return $continents[ $code ]['name'] ?? $code;
+    }
+
+    public function summarize_method( $method ): string {
         $title = (string) $method->get_method_title();
         $detail = '';
 
@@ -307,7 +366,7 @@ trait KISS_WSE_Preview {
     /**
      * Convert a numeric amount to a clean text price (no HTML), preferring wc_price formatting.
      */
-    private function price_to_text( float $amount ): string {
+    public function price_to_text( float $amount ): string {
         if ( function_exists( 'wc_price' ) ) {
             // wc_price returns HTML; strip tags to plain text for table cells
             return trim( wp_strip_all_tags( wc_price( $amount ) ) );
