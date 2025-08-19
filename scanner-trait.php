@@ -21,30 +21,59 @@ trait KISS_WSE_Scanner {
         // Max file size (bytes) allowed for scanning; adjustable via filter
         $max_size_bytes = (int) apply_filters( 'kiss_wse_scanner_max_file_size', 1048576 );
 
+        // --- MASTER DEBUG SECTION ---
+        echo '<details style="background: #f8f9fa; padding: 15px; margin: 15px 0; border: 2px solid #6c757d; border-radius: 8px;">';
+        echo '<summary style="cursor: pointer; font-weight: bold; font-size: 16px; color: #495057; margin-bottom: 15px;">🔧 Debug Information (Click to expand all debugging details)</summary>';
+
+        // --- 1. ADDITIONAL FILE PROCESSING DEBUG ---
+        echo '<details style="background: #fff3cd; padding: 10px; margin: 10px 0; border-left: 4px solid #ffc107;">';
+        echo '<summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">🔍 Form Input Debug (Click to expand)</summary>';
+        echo 'Additional file input: <code>' . esc_html( var_export( $additional, true ) ) . '</code><br>';
+        echo 'Base directory: <code>' . esc_html( var_export( $base_dir, true ) ) . '</code><br>';
+        echo 'Base real path: <code>' . esc_html( var_export( $base_real, true ) ) . '</code><br>';
+        echo 'Condition check ($additional && $base_real): ' . ( $additional && $base_real ? 'TRUE' : 'FALSE' ) . '<br>';
+        echo 'GET parameters: <code>' . esc_html( var_export( $_GET, true ) ) . '</code><br>';
+        echo 'Current URL: <code>' . esc_html( $_SERVER['REQUEST_URI'] ?? 'N/A' ) . '</code><br>';
+        echo '</details>';
+
         if ( $additional && $base_real ) {
+            echo '<details style="background: #e7f3ff; padding: 10px; margin: 10px 0; border-left: 4px solid #2196f3;">';
+            echo '<summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">🔍 Additional File Processing Debug (Click to expand)</summary>';
+            echo 'Raw input: <code>' . esc_html( $additional ) . '</code><br>';
+
             $rel_raw = wp_normalize_path( $additional );
+            echo 'After wp_normalize_path: <code>' . esc_html( $rel_raw ) . '</code><br>';
+            echo 'Base directory: <code>' . esc_html( $base_dir ) . '</code><br>';
+            echo 'Base real path: <code>' . esc_html( $base_real ) . '</code><br>';
 
             // Basic poison null byte check
             if ( strpos( $rel_raw, "\0" ) !== false ) {
+                echo '</details>';
                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Invalid path provided.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
             } else {
                 // Normalize and ensure it is a relative path (no leading slashes)
                 $rel = ltrim( $rel_raw, '/\\' );
+                echo 'After ltrim: <code>' . esc_html( $rel ) . '</code><br>';
 
                 // Reject traversal and suspicious segments (., .., streams)
                 $segments = array_values( array_filter( explode( '/', $rel ), 'strlen' ) );
+                echo 'Segments: <code>' . esc_html( implode( ', ', $segments ) ) . '</code><br>';
                 $invalid  = false;
                 foreach ( $segments as $seg ) {
                     if ( $seg === '.' || $seg === '..' ) { $invalid = true; break; }
                     if ( strpos( $seg, ':' ) !== false ) { $invalid = true; break; }
                 }
+                echo 'Invalid segments check: ' . ( $invalid ? 'FAILED' : 'PASSED' ) . '<br>';
 
                 if ( $invalid ) {
+                    echo '</details>';
                     echo '<div class="notice notice-warning"><p>' . esc_html__( 'Invalid path provided.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                 } else {
                     // Build candidate path under base without following symlinks
                     $base_root  = rtrim( $base_real, '/\\' );
                     $candidate  = wp_normalize_path( $base_root . '/' . implode( '/', $segments ) );
+                    echo 'Base root: <code>' . esc_html( $base_root ) . '</code><br>';
+                    echo 'Candidate path: <code>' . esc_html( $candidate ) . '</code><br>';
 
                     // Deny symlinks in any path segment
                     $walk = $base_root;
@@ -52,61 +81,163 @@ trait KISS_WSE_Scanner {
                         $walk = $walk . DIRECTORY_SEPARATOR . $seg;
                         if ( is_link( $walk ) ) { $invalid = true; break; }
                     }
+                    echo 'Symlink check: ' . ( $invalid ? 'FAILED (symlink found)' : 'PASSED' ) . '<br>';
 
                     if ( $invalid ) {
+                        echo '</details>';
                         echo '<div class="notice notice-warning"><p>' . esc_html__( 'Symlinked paths are not allowed.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                     } elseif ( is_file( $candidate ) ) {
+                        echo 'File exists check: PASSED<br>';
                         // Boundary check with slash guard to avoid prefix tricks
                         $cand_norm = wp_normalize_path( $candidate );
                         $base_norm = rtrim( wp_normalize_path( $base_real ), '/\\' ) . '/';
+                        echo 'Candidate normalized: <code>' . esc_html( $cand_norm ) . '</code><br>';
+                        echo 'Base normalized: <code>' . esc_html( $base_norm ) . '</code><br>';
+                        echo 'Boundary check: ' . ( strpos( $cand_norm, $base_norm ) === 0 ? 'PASSED' : 'FAILED' ) . '<br>';
                         if ( strpos( $cand_norm, $base_norm ) === 0 ) {
                             // Enforce .php extension only
-                            if ( strtolower( pathinfo( $candidate, PATHINFO_EXTENSION ) ) !== 'php' ) {
+                            $extension = strtolower( pathinfo( $candidate, PATHINFO_EXTENSION ) );
+                            echo 'File extension: <code>' . esc_html( $extension ) . '</code><br>';
+                            echo 'Extension check: ' . ( $extension === 'php' ? 'PASSED' : 'FAILED' ) . '<br>';
+                            if ( $extension !== 'php' ) {
+                                echo '</details>';
                                 echo '<div class="notice notice-warning"><p>' . esc_html__( 'Only PHP files can be scanned.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                             } else {
                                 // Enforce size limit
                                 $size = @filesize( $candidate );
+                                echo 'File size: ' . ( $size !== false ? number_format( $size ) . ' bytes' : 'UNKNOWN' ) . '<br>';
+                                echo 'Size limit: ' . number_format( $max_size_bytes ) . ' bytes<br>';
+                                echo 'Size check: ' . ( $size !== false && $size <= $max_size_bytes ? 'PASSED' : 'FAILED' ) . '<br>';
                                 if ( $size === false || $size > $max_size_bytes ) {
+                                    echo '</details>';
                                     echo '<div class="notice notice-warning"><p>' . esc_html__( 'File too large to scan. Reduce size or adjust the limit via filter.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                                 } else {
-                                    if ( ! in_array( $candidate, $files_to_scan, true ) ) {
-                                        $files_to_scan[] = $candidate;
+                                    // Normalize paths for comparison to avoid duplicates
+                                    $normalized_candidate = wp_normalize_path( $candidate );
+                                    $normalized_files = array_map( 'wp_normalize_path', $files_to_scan );
+                                    echo 'Normalized candidate: <code>' . esc_html( $normalized_candidate ) . '</code><br>';
+                                    echo 'Current files in scan list: ' . count( $normalized_files ) . '<br>';
+                                    echo 'Duplicate check: ' . ( in_array( $normalized_candidate, $normalized_files, true ) ? 'DUPLICATE FOUND' : 'UNIQUE FILE' ) . '<br>';
+                                    echo '</details>'; // Close debug section
+
+                                    if ( ! in_array( $normalized_candidate, $normalized_files, true ) ) {
+                                        $files_to_scan[] = $normalized_candidate;
+                                        echo '<div class="notice notice-success" style="margin: 10px 0;"><p>';
+                                        echo '<strong>✅ ' . esc_html__( 'Additional file added for scanning:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                                        echo '<code>' . esc_html( str_replace( get_stylesheet_directory(), '', $normalized_candidate ) ) . '</code><br>';
+                                        echo '<small style="color: #666;">' . esc_html( $normalized_candidate ) . '</small>';
+                                        echo '</p></div>';
+                                    } else {
+                                        echo '<div class="notice notice-info" style="margin: 10px 0;"><p>';
+                                        echo '<strong>ℹ️ ' . esc_html__( 'File already in scan list:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                                        echo '<code>' . esc_html( str_replace( get_stylesheet_directory(), '', $normalized_candidate ) ) . '</code>';
+                                        echo '</p></div>';
                                     }
                                 }
                             }
                         } else {
+                            echo '</details>'; // Close debug section
                             echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file must be inside the active theme directory.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                         }
                     } else {
+                        echo 'File exists check: FAILED<br>';
+                        echo '</details>'; // Close debug section
                         echo '<div class="notice notice-warning"><p>' . esc_html__( 'Additional file not found. Please check the path.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
                     }
                 }
             }
         }
 
-        // --- 2. COLLECT ALL FINDINGS FROM ALL FILES ---
+        // Close master debug section
+        echo '</details>';
+
+        // --- 2. SHOW SCAN STATUS ---
+        if ( empty( $files_to_scan ) ) {
+            echo '<div class="notice notice-info"><p>';
+            echo '<strong>' . esc_html__( 'No files to scan.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+            echo esc_html__( 'Default file not found:', 'kiss-woo-shipping-debugger' ) . ' <code>inc/shipping-restrictions.php</code><br>';
+            if ( $additional ) {
+                echo esc_html__( 'Additional file not found:', 'kiss-woo-shipping-debugger' ) . ' <code>' . esc_html( $additional ) . '</code>';
+            } else {
+                echo esc_html__( 'No additional file specified.', 'kiss-woo-shipping-debugger' );
+            }
+            echo '</p></div>';
+            return;
+        }
+
+        // Show files that will be scanned with theme context
+        echo '<div class="notice notice-success"><p>';
+        echo '<strong>' . esc_html__( 'Files to scan:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+        echo '<em>' . esc_html__( 'Active theme:', 'kiss-woo-shipping-debugger' ) . ' <code>' . esc_html( get_stylesheet() ) . '</code></em><br>';
+        echo '<em>' . esc_html__( 'Theme directory:', 'kiss-woo-shipping-debugger' ) . ' <code>' . esc_html( get_stylesheet_directory() ) . '</code></em><br><br>';
+        foreach ( $files_to_scan as $file ) {
+            $relative_path = str_replace( get_stylesheet_directory(), '', $file );
+            $relative_path = ltrim( $relative_path, '/\\' );
+            echo '✓ <code>' . esc_html( $relative_path ) . '</code><br>';
+            echo '&nbsp;&nbsp;<small style="color: #666;">' . esc_html( $file ) . '</small><br>';
+        }
+        echo '</p></div>';
+
+        // --- 3. COLLECT ALL FINDINGS FROM ALL FILES ---
         $all_findings = [];
         $collected_arrays = []; // Master lookup for all arrays found in all files.
+        $scan_results = []; // Track results per file
+
         foreach ( $files_to_scan as $file ) {
-            echo '<h3>Scanning <code>' . esc_html( wp_make_link_relative( $file ) ) . '</code></h3>';
+            $relative_path = str_replace( get_stylesheet_directory(), '', $file );
+            $relative_path = ltrim( $relative_path, '/\\' );
+            echo '<h3>' . esc_html__( 'Scanning theme file:', 'kiss-woo-shipping-debugger' ) . ' <code>' . esc_html( $relative_path ) . '</code></h3>';
+            echo '<p style="margin: 5px 0; color: #666; font-size: 12px;">' . esc_html__( 'Full path:', 'kiss-woo-shipping-debugger' ) . ' <code>' . esc_html( $file ) . '</code></p>';
+
+            // Debug: Show file status before scanning
+            echo '<details style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-left: 4px solid #0073aa;">';
+            echo '<summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">🔍 Debug Info (Click to expand)</summary>';
+            echo 'File exists: ' . ( file_exists( $file ) ? '✅ Yes' : '❌ No' ) . '<br>';
+            echo 'File readable: ' . ( is_readable( $file ) ? '✅ Yes' : '❌ No' ) . '<br>';
+            echo 'File size: ' . ( file_exists( $file ) ? number_format( filesize( $file ) ) . ' bytes' : 'N/A' ) . '<br>';
+            echo '</details>';
 
             if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
                 echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan file:', 'kiss-woo-shipping-debugger' ) . ' ' . esc_html(wp_make_link_relative($file)) . '</em></p>';
                 continue;
             }
 
-            $code   = file_get_contents( $file );
-            $parser = $this->create_parser();
-            $ast    = $parser->parse( $code );
-            $trav   = new \PhpParser\NodeTraverser();
+            try {
+                echo '<details style="background: #fff3cd; padding: 10px; margin: 10px 0; border-left: 4px solid #ffc107;">';
+                echo '<summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">📖 Starting file parse... (Click to expand)</summary>';
 
-            // Add visitors. The ArrayCollector must run before the RateAddCallVisitor.
-            $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
-            $array_collector = new \KISSShippingDebugger\ArrayCollectorVisitor();
-            $trav->addVisitor( $array_collector );
-            $rate_visitor = new \KISSShippingDebugger\RateAddCallVisitor();
-            $trav->addVisitor( $rate_visitor );
-            $trav->traverse( $ast );
+                $code = file_get_contents( $file );
+                echo 'File content loaded: ' . number_format( strlen( $code ) ) . ' characters<br>';
+
+                $parser = $this->create_parser();
+                echo 'Parser created successfully<br>';
+
+                $ast = $parser->parse( $code );
+                echo 'AST parsed successfully<br>';
+
+                $trav = new \PhpParser\NodeTraverser();
+                echo 'Node traverser created<br>';
+
+                // Add visitors. The ArrayCollector must run before the RateAddCallVisitor.
+                $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
+                $array_collector = new \KISSShippingDebugger\ArrayCollectorVisitor();
+                $trav->addVisitor( $array_collector );
+                $rate_visitor = new \KISSShippingDebugger\RateAddCallVisitor();
+                $trav->addVisitor( $rate_visitor );
+                echo 'Visitors added successfully<br>';
+
+                $trav->traverse( $ast );
+                echo '<strong>✅ File traversal completed successfully!</strong><br>';
+                echo '</details>';
+            } catch ( \Exception $e ) {
+                echo '<div style="background: #f8d7da; padding: 10px; margin: 10px 0; border-left: 4px solid #dc3545;">';
+                echo '<strong>❌ Error parsing file:</strong><br>';
+                echo 'Error: ' . esc_html( $e->getMessage() ) . '<br>';
+                echo 'File: ' . esc_html( $e->getFile() ) . '<br>';
+                echo 'Line: ' . esc_html( $e->getLine() ) . '<br>';
+                echo '</div>';
+                continue; // Skip this file and move to the next
+            }
 
             // Store the collected arrays for this file.
             $collected_arrays[$file] = $array_collector->getArraysByScope();
@@ -119,9 +250,21 @@ trait KISS_WSE_Scanner {
                 'rateCalls'   => $rate_visitor->getAddRateNodes(),
                 'newRates'    => $rate_visitor->getNewRateNodes(),
                 'addFees'     => $rate_visitor->getAddFeeNodes(),
+                'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),
+                'paymentFilters'  => $rate_visitor->getPaymentMethodFilterNodes(),
+                'checkoutPayment' => $rate_visitor->getCheckoutPaymentHookNodes(),
+                'generalWooHooks' => $rate_visitor->getGeneralWooHookNodes(),
             ];
 
+            // Count findings for this file
+            $file_findings_count = 0;
+            $file_findings_by_type = [];
+
             foreach($sections as $key => $nodes) {
+                if (!empty($nodes)) {
+                    $file_findings_by_type[$key] = count($nodes);
+                    $file_findings_count += count($nodes);
+                }
                 foreach($nodes as $node) {
                     $all_findings[] = [
                         'file' => $file,
@@ -130,6 +273,82 @@ trait KISS_WSE_Scanner {
                     ];
                 }
             }
+
+            // Show immediate feedback for this file
+            if ($file_findings_count > 0) {
+                echo '<div class="notice notice-success" style="margin: 10px 0;"><p>';
+                echo '<strong>' . sprintf(
+                    esc_html__( '✅ Found %d WooCommerce-related items in this file:', 'kiss-woo-shipping-debugger' ),
+                    $file_findings_count
+                ) . '</strong><br>';
+                foreach ($file_findings_by_type as $type => $count) {
+                    echo '• ' . esc_html($this->short_explanation_label($type)) . ': ' . $count . '<br>';
+                }
+                echo '</p></div>';
+            } else {
+                echo '<div class="notice notice-warning" style="margin: 10px 0;"><p>';
+                echo '<strong>' . esc_html__( '⚠️ No WooCommerce shipping/payment patterns detected in this file.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                echo esc_html__( 'This could mean:', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The file contains general WooCommerce hooks not related to shipping/payments', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The file doesn\'t contain WooCommerce customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
+
+                // Add debugging info to show what we found vs what we're looking for
+                echo '<details style="margin-top: 10px; font-family: monospace; font-size: 12px; background: #f0f8ff; padding: 10px; border-radius: 3px; border-left: 4px solid #0073aa;">';
+                echo '<summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">🔍 Debug Info: Hook Statistics (Click to expand)</summary>';
+                echo '<strong>' . esc_html__( 'Hook Statistics Found in This File:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                echo '• Total add_action() calls: ' . esc_html( $rate_visitor->getTotalAddActionCalls() ) . '<br>';
+                echo '• Total add_filter() calls: ' . esc_html( $rate_visitor->getTotalAddFilterCalls() ) . '<br>';
+                echo '• WooCommerce hooks (woocommerce_*, wc_*): ' . esc_html( $rate_visitor->getTotalWooCommerceCalls() ) . '<br>';
+                echo '</details>';
+
+                echo '<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #0073aa;">' . esc_html__( 'Click to see what specific patterns we scan for', 'kiss-woo-shipping-debugger' ) . '</summary>';
+                echo '<div style="margin-top: 10px; font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 10px; border-radius: 3px;">';
+                echo '<strong>' . esc_html__( 'Shipping & Payment Patterns We Look For:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                echo '• add_filter(\'woocommerce_package_rates\', ...)<br>';
+                echo '• add_action(\'woocommerce_cart_calculate_fees\', ...)<br>';
+                echo '• $package->add_rate(...)<br>';
+                echo '• new WC_Shipping_Rate(...)<br>';
+                echo '• $cart->add_fee(...)<br>';
+                echo '• unset($rates[...])<br>';
+                echo '• $errors->add(...)<br>';
+                echo '• Payment gateway hooks<br>';
+                echo '• Checkout validation hooks<br>';
+                echo '• General WooCommerce hooks (woocommerce_*, wc_*)<br>';
+                echo '</div></details>';
+                echo '</p></div>';
+            }
+
+            $scan_results[$file] = [
+                'count' => $file_findings_count,
+                'types' => $file_findings_by_type
+            ];
+        }
+
+        // --- SCAN SUMMARY ---
+        $total_findings = count($all_findings);
+        $total_files_scanned = count($scan_results);
+        $files_with_findings = count(array_filter($scan_results, function($result) { return $result['count'] > 0; }));
+
+        echo '<hr><div class="notice notice-info"><p>';
+        echo '<strong>' . esc_html__( 'Scan Summary:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+        echo sprintf(
+            esc_html__( '📁 Files scanned: %d | ✓ Files with findings: %d | 🔍 Total items found: %d', 'kiss-woo-shipping-debugger' ),
+            $total_files_scanned,
+            $files_with_findings,
+            $total_findings
+        );
+        echo '</p></div>';
+
+        if ($total_findings === 0) {
+            echo '<div class="notice notice-warning"><p>';
+            echo '<strong>' . esc_html__( 'No shipping or payment-related code detected.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+            echo esc_html__( 'This could mean:', 'kiss-woo-shipping-debugger' ) . '<br>';
+            echo '• ' . esc_html__( 'The files don\'t contain WooCommerce customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
+            echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
+            echo '• ' . esc_html__( 'The customizations are in other files not being scanned', 'kiss-woo-shipping-debugger' );
+            echo '</p></div>';
+            return;
         }
 
         // --- 3. GROUP FINDINGS ---
@@ -275,6 +494,10 @@ trait KISS_WSE_Scanner {
             case 'unsetRates':  return __( 'Removes a rate', 'kiss-woo-shipping-debugger' );
             case 'addFees':     return __( 'Adds a cart fee', 'kiss-woo-shipping-debugger' );
             case 'errors':      return __( 'Checkout rule', 'kiss-woo-shipping-debugger' );
+            case 'paymentGateways': return __( 'Modifies payment gateways', 'kiss-woo-shipping-debugger' );
+            case 'paymentFilters':  return __( 'Payment method filtering', 'kiss-woo-shipping-debugger' );
+            case 'checkoutPayment': return __( 'Checkout payment hooks', 'kiss-woo-shipping-debugger' );
+            case 'generalWooHooks': return __( 'WooCommerce hooks', 'kiss-woo-shipping-debugger' );
             default:            return __( 'Matched code', 'kiss-woo-shipping-debugger' );
         }
     }
@@ -436,6 +659,79 @@ trait KISS_WSE_Scanner {
                     }
                     if ( $when !== '' ) {
                         $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
+
+                case 'paymentGateways':
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+                    if ( $cb ) {
+                        return sprintf(
+                            __( 'Modifies available payment gateways (%s). This can hide/show payment methods based on conditions.', 'kiss-woo-shipping-debugger' ),
+                            $cb
+                        );
+                    }
+                    return __( 'Modifies available payment gateways. This can hide/show payment methods based on conditions.', 'kiss-woo-shipping-debugger' );
+
+                case 'paymentFilters':
+                    $hook_name = '';
+                    if ( property_exists( $node, 'args' ) && isset( $node->args[0] ) ) {
+                        $hook_name = $this->extract_string( $node->args[0]->value, $collected_arrays, $current_file );
+                    }
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+                    $summary = __( 'Payment-related action hook.', 'kiss-woo-shipping-debugger' );
+                    if ( $hook_name !== '' ) {
+                        $summary = sprintf( __( 'Hooks into "%s" for payment processing.', 'kiss-woo-shipping-debugger' ), $hook_name );
+                    }
+                    if ( $cb ) {
+                        $summary .= ' ' . sprintf( __( 'Callback: %s.', 'kiss-woo-shipping-debugger' ), $cb );
+                    }
+                    return $summary;
+
+                case 'checkoutPayment':
+                    $hook_name = '';
+                    if ( property_exists( $node, 'args' ) && isset( $node->args[0] ) ) {
+                        $hook_name = $this->extract_string( $node->args[0]->value, $collected_arrays, $current_file );
+                    }
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
+
+                    $summary = __( 'Checkout payment section hook.', 'kiss-woo-shipping-debugger' );
+                    if ( $hook_name !== '' ) {
+                        $summary = sprintf( __( 'Hooks into "%s" during checkout payment display.', 'kiss-woo-shipping-debugger' ), $hook_name );
+                    }
+                    if ( $cb ) {
+                        $summary .= ' ' . sprintf( __( 'Callback: %s.', 'kiss-woo-shipping-debugger' ), $cb );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
+
+                case 'generalWooHooks':
+                    $hook_name = '';
+                    $hook_type = 'action';
+                    if ( property_exists( $node, 'name' ) && $node->name instanceof \PhpParser\Node\Name ) {
+                        $hook_type = $node->name->toString() === 'add_filter' ? 'filter' : 'action';
+                    }
+                    if ( property_exists( $node, 'args' ) && isset( $node->args[0] ) ) {
+                        $hook_name = $this->extract_string( $node->args[0]->value, $collected_arrays, $current_file );
+                    }
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+
+                    $summary = sprintf( __( 'WooCommerce %s hook.', 'kiss-woo-shipping-debugger' ), $hook_type );
+                    if ( $hook_name !== '' ) {
+                        $summary = sprintf( __( 'Hooks into "%s" (%s).', 'kiss-woo-shipping-debugger' ), $hook_name, $hook_type );
+                    }
+                    if ( $cb ) {
+                        $summary .= ' ' . sprintf( __( 'Callback: %s.', 'kiss-woo-shipping-debugger' ), $cb );
                     }
                     return $summary;
             }

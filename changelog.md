@@ -2,6 +2,22 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.6.0
+* **Major Feature:** Enhanced scanner to detect payment-related functionality in addition to shipping rules.
+  * Added detection for payment gateway modifications (`woocommerce_available_payment_gateways`, `woocommerce_gateway_title`, `woocommerce_gateway_description`)
+  * Added detection for payment method filtering hooks (any `add_action` with "payment" or "checkout" keywords)
+  * Added detection for checkout payment section hooks (`checkout_payment`, `before_checkout_payment`, `after_checkout_payment`)
+  * Scanner now catches functions like `add_action('neo_before_checkout_payment', 'callback')` for payment restrictions
+* **Enhancement:** Updated plugin name to "KISS Woo Shipping & Payment Settings Debugger" to reflect expanded capabilities
+* **Enhancement:** Enhanced scanner descriptions to provide detailed explanations for payment-related code patterns
+* **Enhancement:** Updated admin interface labels and descriptions to mention both shipping and payment functionality
+* **Fix:** Resolved critical syntax errors that were causing plugin activation crashes
+  * Fixed extra closing brace in scanner-trait.php
+  * Fixed incorrectly nested method definitions in main plugin file
+  * Removed duplicate method definitions that conflicted with trait implementations
+  * Fixed misplaced code blocks referencing undefined variables
+* **QA:** All PHP files now pass syntax validation and the plugin activates without errors
+
 ## 2.5.0
 
 ## 2.5.1

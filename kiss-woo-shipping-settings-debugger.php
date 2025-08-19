@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: KISS Woo Shipping Settings Debugger
- * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     2.5.1
+ * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
+ * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
+ * Version:     2.6.0
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -139,6 +139,10 @@ trait KISS_WSE_Testable {
             'addFees'     => $rate_visitor->getAddFeeNodes(),
             'newRates'    => $rate_visitor->getNewRateNodes(),
             'errors'      => $rate_visitor->getErrorAddNodes(),
+            'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),
+            'paymentFilters'  => $rate_visitor->getPaymentMethodFilterNodes(),
+            'checkoutPayment' => $rate_visitor->getCheckoutPaymentHookNodes(),
+            'generalWooHooks' => $rate_visitor->getGeneralWooHookNodes(),
         ];
 
         $all_findings = [];
@@ -245,8 +249,8 @@ class KISS_WSE_Debugger {
         // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
         add_submenu_page(
             'woocommerce',
-            __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'Shipping Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+            __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
             'manage_woocommerce',
             $this->page_slug,
             [ $this, 'render_page' ]
@@ -264,8 +268,13 @@ class KISS_WSE_Debugger {
             $additional = sanitize_text_field( (string) get_option( 'kiss_wse_additional_file', '' ) );
         }
 
+        // If additional is empty, set a default value
+        if ( empty( $additional ) ) {
+            $additional = 'inc/woo-functions.php';
+        }
+
         echo '<div class="wrap">';
-        echo '<h1>' . esc_html__( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
+        echo '<h1>' . esc_html__( 'KISS Woo Shipping & Payment Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
 
         // --- PHP-Parser Status & Self-Test (auto) ---
         $parser_loaded = class_exists( \PhpParser\ParserFactory::class );
@@ -309,7 +318,7 @@ class KISS_WSE_Debugger {
 
         // --- Custom Rules Scanner UI ---
         echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
-        echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
+        echo '<p>' . esc_html__( 'Scans your theme files for shipping and payment-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
         printf(
             '<form method="get" style="padding:1em;border:1px solid #c3c4c7;background:#fff;">
                 <input type="hidden" name="page" value="%1$s">
