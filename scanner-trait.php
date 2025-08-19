@@ -246,14 +246,11 @@ trait KISS_WSE_Scanner {
                 'errors'      => $rate_visitor->getErrorAddNodes(),
                 'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
                 'filterHooks' => $rate_visitor->getFilterHookNodes(),
-                'feeHooks'    => $rate_visitor->getFeeHookNodes(),
                 'rateCalls'   => $rate_visitor->getAddRateNodes(),
                 'newRates'    => $rate_visitor->getNewRateNodes(),
-                'addFees'     => $rate_visitor->getAddFeeNodes(),
                 'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),
                 'paymentFilters'  => $rate_visitor->getPaymentMethodFilterNodes(),
-                'checkoutPayment' => $rate_visitor->getCheckoutPaymentHookNodes(),
-                'generalWooHooks' => $rate_visitor->getGeneralWooHookNodes(),
+                'checkoutProcess' => $rate_visitor->getCheckoutProcessHookNodes(),
             ];
 
             // Count findings for this file
@@ -287,11 +284,11 @@ trait KISS_WSE_Scanner {
                 echo '</p></div>';
             } else {
                 echo '<div class="notice notice-warning" style="margin: 10px 0;"><p>';
-                echo '<strong>' . esc_html__( '⚠️ No WooCommerce shipping/payment patterns detected in this file.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                echo '<strong>' . esc_html__( '⚠️ No geographical or payment method restriction patterns detected in this file.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
                 echo esc_html__( 'This could mean:', 'kiss-woo-shipping-debugger' ) . '<br>';
-                echo '• ' . esc_html__( 'The file contains general WooCommerce hooks not related to shipping/payments', 'kiss-woo-shipping-debugger' ) . '<br>';
-                echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
-                echo '• ' . esc_html__( 'The file doesn\'t contain WooCommerce customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The file contains general WooCommerce hooks not related to geographical/payment restrictions', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our focused scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
+                echo '• ' . esc_html__( 'The file doesn\'t contain geographical or payment method customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
 
                 // Add debugging info to show what we found vs what we're looking for
                 echo '<details style="margin-top: 10px; font-family: monospace; font-size: 12px; background: #f0f8ff; padding: 10px; border-radius: 3px; border-left: 4px solid #0073aa;">';
@@ -304,17 +301,17 @@ trait KISS_WSE_Scanner {
 
                 echo '<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #0073aa;">' . esc_html__( 'Click to see what specific patterns we scan for', 'kiss-woo-shipping-debugger' ) . '</summary>';
                 echo '<div style="margin-top: 10px; font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 10px; border-radius: 3px;">';
-                echo '<strong>' . esc_html__( 'Shipping & Payment Patterns We Look For:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
-                echo '• add_filter(\'woocommerce_package_rates\', ...)<br>';
-                echo '• add_action(\'woocommerce_cart_calculate_fees\', ...)<br>';
-                echo '• $package->add_rate(...)<br>';
-                echo '• new WC_Shipping_Rate(...)<br>';
-                echo '• $cart->add_fee(...)<br>';
-                echo '• unset($rates[...])<br>';
-                echo '• $errors->add(...)<br>';
-                echo '• Payment gateway hooks<br>';
-                echo '• Checkout validation hooks<br>';
-                echo '• General WooCommerce hooks (woocommerce_*, wc_*)<br>';
+                echo '<strong>' . esc_html__( 'Geographical & Payment Method Patterns We Look For:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+                echo '• <strong>Geographical Restrictions:</strong><br>';
+                echo '&nbsp;&nbsp;• Location-based shipping rate filtering (city, state, zip, country)<br>';
+                echo '&nbsp;&nbsp;• unset($rates[...]) based on geographical conditions<br>';
+                echo '&nbsp;&nbsp;• Custom shipping rates for specific locations<br>';
+                echo '&nbsp;&nbsp;• Checkout validation based on shipping addresses<br>';
+                echo '• <strong>Payment Method Restrictions:</strong><br>';
+                echo '&nbsp;&nbsp;• Payment gateway filtering (American Express, specific gateways)<br>';
+                echo '&nbsp;&nbsp;• add_filter(\'woocommerce_available_payment_gateways\', ...)<br>';
+                echo '&nbsp;&nbsp;• Payment method restrictions based on location or cart contents<br>';
+                echo '&nbsp;&nbsp;• Checkout validation for payment methods<br>';
                 echo '</div></details>';
                 echo '</p></div>';
             }
@@ -342,10 +339,10 @@ trait KISS_WSE_Scanner {
 
         if ($total_findings === 0) {
             echo '<div class="notice notice-warning"><p>';
-            echo '<strong>' . esc_html__( 'No shipping or payment-related code detected.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
+            echo '<strong>' . esc_html__( 'No geographical or payment method restriction code detected.', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
             echo esc_html__( 'This could mean:', 'kiss-woo-shipping-debugger' ) . '<br>';
-            echo '• ' . esc_html__( 'The files don\'t contain WooCommerce customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
-            echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
+            echo '• ' . esc_html__( 'The files don\'t contain geographical or payment method customizations', 'kiss-woo-shipping-debugger' ) . '<br>';
+            echo '• ' . esc_html__( 'The code uses patterns not yet recognized by our focused scanner', 'kiss-woo-shipping-debugger' ) . '<br>';
             echo '• ' . esc_html__( 'The customizations are in other files not being scanned', 'kiss-woo-shipping-debugger' );
             echo '</p></div>';
             return;
@@ -487,17 +484,14 @@ trait KISS_WSE_Scanner {
 
     private function short_explanation_label( string $key ): string {
         switch ( $key ) {
-            case 'filterHooks': return __( 'Modifies shipping rates', 'kiss-woo-shipping-debugger' );
-            case 'feeHooks':    return __( 'Adjusts cart fees/totals', 'kiss-woo-shipping-debugger' );
-            case 'rateCalls':   return __( 'Adds a custom rate', 'kiss-woo-shipping-debugger' );
-            case 'newRates':    return __( 'Creates a rate object', 'kiss-woo-shipping-debugger' );
-            case 'unsetRates':  return __( 'Removes a rate', 'kiss-woo-shipping-debugger' );
-            case 'addFees':     return __( 'Adds a cart fee', 'kiss-woo-shipping-debugger' );
-            case 'errors':      return __( 'Checkout rule', 'kiss-woo-shipping-debugger' );
-            case 'paymentGateways': return __( 'Modifies payment gateways', 'kiss-woo-shipping-debugger' );
-            case 'paymentFilters':  return __( 'Payment method filtering', 'kiss-woo-shipping-debugger' );
-            case 'checkoutPayment': return __( 'Checkout payment hooks', 'kiss-woo-shipping-debugger' );
-            case 'generalWooHooks': return __( 'WooCommerce hooks', 'kiss-woo-shipping-debugger' );
+            case 'filterHooks': return __( 'Geographical shipping rate filtering', 'kiss-woo-shipping-debugger' );
+            case 'rateCalls':   return __( 'Location-based custom rate', 'kiss-woo-shipping-debugger' );
+            case 'newRates':    return __( 'Location-based rate object', 'kiss-woo-shipping-debugger' );
+            case 'unsetRates':  return __( 'Geographical rate removal', 'kiss-woo-shipping-debugger' );
+            case 'errors':      return __( 'Geographical/payment validation', 'kiss-woo-shipping-debugger' );
+            case 'paymentGateways': return __( 'Payment gateway restrictions', 'kiss-woo-shipping-debugger' );
+            case 'paymentFilters':  return __( 'Payment method restrictions', 'kiss-woo-shipping-debugger' );
+            case 'checkoutProcess': return __( 'Geographical/payment checkout validation', 'kiss-woo-shipping-debugger' );
             default:            return __( 'Matched code', 'kiss-woo-shipping-debugger' );
         }
     }

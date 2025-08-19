@@ -136,13 +136,13 @@ trait KISS_WSE_Testable {
 
         $sections = [
             'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
-            'addFees'     => $rate_visitor->getAddFeeNodes(),
             'newRates'    => $rate_visitor->getNewRateNodes(),
             'errors'      => $rate_visitor->getErrorAddNodes(),
             'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),
             'paymentFilters'  => $rate_visitor->getPaymentMethodFilterNodes(),
-            'checkoutPayment' => $rate_visitor->getCheckoutPaymentHookNodes(),
-            'generalWooHooks' => $rate_visitor->getGeneralWooHookNodes(),
+            'checkoutProcess' => $rate_visitor->getCheckoutProcessHookNodes(),
+            'filterHooks' => $rate_visitor->getFilterHookNodes(),
+            'rateCalls'   => $rate_visitor->getAddRateNodes(),
         ];
 
         $all_findings = [];

@@ -23,25 +23,17 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
     /** @var Node[] */
     private array $filterHookNodes = [];
     /** @var Node[] */
-    private array $feeHookNodes    = [];
-    /** @var Node[] */
     private array $errorAddNodes   = [];
     /** @var Node[] */
     private array $unsetRateNodes  = [];
     /** @var Node[] */
     private array $newRateNodes    = [];
     /** @var Node[] */
-    private array $addFeeNodes     = [];
-    /** @var Node[] */
     private array $checkoutProcessHookNodes = [];
     /** @var Node[] */
     private array $paymentGatewayHookNodes = [];
     /** @var Node[] */
     private array $paymentMethodFilterNodes = [];
-    /** @var Node[] */
-    private array $checkoutPaymentHookNodes = [];
-    /** @var Node[] */
-    private array $generalWooHookNodes = [];
 
     // Debug counters
     private int $totalAddActionCalls = 0;
@@ -73,84 +65,71 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
             }
         }
 
-        // 1) $package->add_rate(...)
+        // 1) $package->add_rate(...) - Only if it appears to be location-based
         if ($node instanceof MethodCall
             && $node->name instanceof Identifier
             && $node->name->toString() === 'add_rate'
+            && $this->isGeographicallyRelevant($node)
         ) {
             $this->addRateNodes[] = $node;
         }
 
-        // 2) add_filter('woocommerce_package_rates', ...)
+        // 2) add_filter('woocommerce_package_rates', ...) - Only if geographical filtering
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && $node->name->toString() === 'add_filter'
             && isset($node->args[0])
             && $node->args[0]->value instanceof String_
             && $node->args[0]->value->value === 'woocommerce_package_rates'
+            && $this->isGeographicallyRelevant($node)
         ) {
             $this->filterHookNodes[] = $node;
         }
 
-        // 3) add_action('woocommerce_cart_calculate_fees', ...)
-        if ($node instanceof FuncCall
-            && $node->name instanceof Name
-            && $node->name->toString() === 'add_action'
-            && isset($node->args[0])
-            && $node->args[0]->value instanceof String_
-            && $node->args[0]->value->value === 'woocommerce_cart_calculate_fees'
-        ) {
-            $this->feeHookNodes[] = $node;
-        }
-
-        // 4) $errors->add(...)
+        // 3) $errors->add(...) - Only if related to geographical or payment validation
         if ($node instanceof MethodCall
             && $node->name instanceof Identifier
             && $node->name->toString() === 'add'
             && $node->var instanceof Variable
             && $node->var->name === 'errors'
+            && ($this->isGeographicallyRelevant($node) || $this->isPaymentRelevant($node))
         ) {
             $this->errorAddNodes[] = $node;
         }
 
-        // 5) unset($rates[...])
+        // 4) unset($rates[...]) - Only if geographical conditions are present
         if ($node instanceof Unset_
             && isset($node->vars[0])
             && $node->vars[0] instanceof ArrayDimFetch
             && $node->vars[0]->var instanceof Variable
             && $node->vars[0]->var->name === 'rates'
+            && $this->isGeographicallyRelevant($node)
         ) {
             $this->unsetRateNodes[] = $node;
         }
 
-        // 6) new WC_Shipping_Rate(...)
+        // 5) new WC_Shipping_Rate(...) - Only if location-based
         if ($node instanceof New_
             && $node->class instanceof Name
             && $node->class->toString() === 'WC_Shipping_Rate'
+            && $this->isGeographicallyRelevant($node)
         ) {
             $this->newRateNodes[] = $node;
         }
-
-        // 7) $cart->add_fee(...)
-        if ($node instanceof MethodCall
-            && $node->name instanceof Identifier
-            && $node->name->toString() === 'add_fee'
-        ) {
-            $this->addFeeNodes[] = $node;
-        }
         
-        // 8) add_action('woocommerce_checkout_process', ...) or add_action('woocommerce_after_checkout_validation', ...)
+        // 6) add_action('woocommerce_checkout_process', ...) - Only if geographical/payment relevant
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && $node->name->toString() === 'add_action'
             && isset($node->args[0])
             && $node->args[0]->value instanceof String_
             && in_array($node->args[0]->value->value, ['woocommerce_checkout_process', 'woocommerce_after_checkout_validation'])
+            && ($this->isGeographicallyRelevant($node) || $this->isPaymentRelevant($node))
         ) {
             $this->checkoutProcessHookNodes[] = $node;
         }
 
-        // 9) Payment gateway related hooks: add_filter('woocommerce_available_payment_gateways', ...)
+        // 7) Payment gateway related hooks: add_filter('woocommerce_available_payment_gateways', ...)
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && $node->name->toString() === 'add_filter'
@@ -165,101 +144,37 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
             $this->paymentGatewayHookNodes[] = $node;
         }
 
-        // 10) Payment method filtering: add_action with payment-related hooks (expanded patterns)
-        if ($node instanceof FuncCall
-            && $node->name instanceof Name
-            && $node->name->toString() === 'add_action'
-            && isset($node->args[0])
-            && $node->args[0]->value instanceof String_
-        ) {
-            $hook_name = $node->args[0]->value->value;
-            // More comprehensive payment-related hook detection
-            if (strpos($hook_name, 'payment') !== false
-                || strpos($hook_name, 'checkout') !== false
-                || strpos($hook_name, 'woocommerce_') === 0  // Any WooCommerce hook
-                || strpos($hook_name, 'wc_') === 0           // WC prefixed hooks
-                || strpos($hook_name, 'gateway') !== false
-                || strpos($hook_name, 'billing') !== false
-                || strpos($hook_name, 'order') !== false
-                || strpos($hook_name, 'cart') !== false
-            ) {
-                $this->paymentMethodFilterNodes[] = $node;
-            }
-        }
-
-        // 11) Payment filters: add_filter with payment/WooCommerce-related hooks
-        if ($node instanceof FuncCall
-            && $node->name instanceof Name
-            && $node->name->toString() === 'add_filter'
-            && isset($node->args[0])
-            && $node->args[0]->value instanceof String_
-        ) {
-            $hook_name = $node->args[0]->value->value;
-            // Detect WooCommerce filters that aren't already caught by paymentGatewayHookNodes
-            if ((strpos($hook_name, 'woocommerce_') === 0 || strpos($hook_name, 'wc_') === 0)
-                && !in_array($hook_name, [
-                    'woocommerce_available_payment_gateways',
-                    'woocommerce_gateway_title',
-                    'woocommerce_gateway_description',
-                    'woocommerce_package_rates'  // Already handled in filterHooks
-                ])
-            ) {
-                $this->paymentMethodFilterNodes[] = $node;
-            }
-        }
-
-        // 12) Checkout payment section hooks (like neo_before_checkout_payment)
-        if ($node instanceof FuncCall
-            && $node->name instanceof Name
-            && $node->name->toString() === 'add_action'
-            && isset($node->args[0])
-            && $node->args[0]->value instanceof String_
-            && (strpos($node->args[0]->value->value, 'checkout_payment') !== false
-                || strpos($node->args[0]->value->value, 'before_checkout_payment') !== false
-                || strpos($node->args[0]->value->value, 'after_checkout_payment') !== false
-                || strpos($node->args[0]->value->value, 'neo_') === 0)  // Neo theme hooks
-        ) {
-            $this->checkoutPaymentHookNodes[] = $node;
-        }
-
-        // 13) General WooCommerce hooks (catch-all for any WooCommerce hook not already categorized)
+        // 8) Specific payment method filtering - Only for targeted payment restrictions
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && in_array($node->name->toString(), ['add_action', 'add_filter'])
             && isset($node->args[0])
             && $node->args[0]->value instanceof String_
+            && $this->isPaymentRelevant($node)
         ) {
             $hook_name = $node->args[0]->value->value;
-            // Expanded WooCommerce hook detection
-            $isWooCommerceRelated = (
-                strpos($hook_name, 'woocommerce_') === 0 ||
-                strpos($hook_name, 'wc_') === 0 ||
-                // WooCommerce AJAX hooks
-                (strpos($hook_name, 'wp_ajax_') === 0 && $this->isWooCommerceAjaxHook($hook_name)) ||
-                // Theme-specific WooCommerce hooks
-                strpos($hook_name, 'shoptimizer_') === 0 ||
-                strpos($hook_name, 'neo_') === 0
-            );
-
-            // Only catch WooCommerce hooks that haven't been caught by other specific categories
-            if ($isWooCommerceRelated && !$this->isAlreadyCategorized($hook_name, $node)) {
-                $this->generalWooHookNodes[] = $node;
+            // Only capture payment-specific hooks that are actually relevant
+            if (strpos($hook_name, 'payment') !== false
+                || strpos($hook_name, 'gateway') !== false
+                || strpos($hook_name, 'billing') !== false
+                || in_array($hook_name, [
+                    'woocommerce_checkout_process',
+                    'woocommerce_after_checkout_validation'
+                ])
+            ) {
+                $this->paymentMethodFilterNodes[] = $node;
             }
         }
     }
 
     public function getAddRateNodes(): array    { return $this->addRateNodes; }
     public function getFilterHookNodes(): array { return $this->filterHookNodes; }
-    public function getFeeHookNodes(): array    { return $this->feeHookNodes; }
     public function getErrorAddNodes(): array   { return $this->errorAddNodes; }
     public function getUnsetRateNodes(): array  { return $this->unsetRateNodes; }
     public function getNewRateNodes(): array    { return $this->newRateNodes; }
-    public function getAddFeeNodes(): array     { return $this->addFeeNodes; }
     public function getCheckoutProcessHookNodes(): array { return $this->checkoutProcessHookNodes; }
     public function getPaymentGatewayHookNodes(): array { return $this->paymentGatewayHookNodes; }
     public function getPaymentMethodFilterNodes(): array { return $this->paymentMethodFilterNodes; }
-    public function getCheckoutPaymentHookNodes(): array { return $this->checkoutPaymentHookNodes; }
-    public function getGeneralWooHookNodes(): array { return $this->generalWooHookNodes; }
 
     // Debug getters
     public function getTotalAddActionCalls(): int { return $this->totalAddActionCalls; }
@@ -322,5 +237,95 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
         }
 
         return false;
+    }
+
+    /**
+     * Check if a node is geographically relevant by examining surrounding context
+     */
+    private function isGeographicallyRelevant(Node $node): bool {
+        // Look for geographical keywords in the surrounding context
+        $geographicalKeywords = [
+            'country', 'state', 'city', 'zip', 'postal', 'address',
+            'location', 'region', 'province', 'territory', 'shipping_country',
+            'shipping_state', 'shipping_city', 'shipping_postcode',
+            'billing_country', 'billing_state', 'billing_city', 'billing_postcode',
+            'destination', 'origin', 'zone', 'US', 'CA', 'UK', 'AU'
+        ];
+
+        return $this->nodeContainsKeywords($node, $geographicalKeywords);
+    }
+
+    /**
+     * Check if a node is payment method relevant
+     */
+    private function isPaymentRelevant(Node $node): bool {
+        // Look for payment method keywords
+        $paymentKeywords = [
+            'payment', 'gateway', 'amex', 'american_express', 'visa', 'mastercard',
+            'paypal', 'stripe', 'credit_card', 'debit', 'payment_method',
+            'payment_gateway', 'available_gateways', 'payment_methods'
+        ];
+
+        return $this->nodeContainsKeywords($node, $paymentKeywords);
+    }
+
+    /**
+     * Helper method to check if a node or its context contains specific keywords
+     */
+    private function nodeContainsKeywords(Node $node, array $keywords): bool {
+        // Convert node to string representation for keyword search
+        $nodeString = $this->nodeToString($node);
+
+        foreach ($keywords as $keyword) {
+            if (stripos($nodeString, $keyword) !== false) {
+                return true;
+            }
+        }
+
+        // Also check parent nodes for context
+        if (property_exists($node, 'getAttribute') && $node->getAttribute('parent')) {
+            $parent = $node->getAttribute('parent');
+            if ($parent) {
+                $parentString = $this->nodeToString($parent);
+                foreach ($keywords as $keyword) {
+                    if (stripos($parentString, $keyword) !== false) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Convert a node to a string representation for keyword searching
+     */
+    private function nodeToString(Node $node): string {
+        // Simple string representation - could be enhanced
+        if (method_exists($node, '__toString')) {
+            return (string) $node;
+        }
+
+        // For basic nodes, try to extract meaningful content
+        $content = '';
+        if ($node instanceof String_) {
+            $content .= $node->value;
+        } elseif ($node instanceof Variable && is_string($node->name)) {
+            $content .= $node->name;
+        } elseif ($node instanceof Identifier) {
+            $content .= $node->name;
+        }
+
+        // Add any string arguments
+        if (property_exists($node, 'args') && is_array($node->args)) {
+            foreach ($node->args as $arg) {
+                if (isset($arg->value) && $arg->value instanceof String_) {
+                    $content .= ' ' . $arg->value->value;
+                }
+            }
+        }
+
+        return strtolower($content);
     }
 }

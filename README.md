@@ -8,7 +8,7 @@ Requires PHP: 7.4
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
-A simple, robust tool for store managers and developers to **audit, preview, and export** WooCommerce shipping settings—and to **scan custom theme code** for shipping logic via PHP-Parser (AST).
+A simple, robust tool for store managers and developers to **audit, preview, and export** WooCommerce shipping settings—and to **scan custom theme code** for geographical restrictions and payment method filtering via PHP-Parser (AST).
 
 ---
 
@@ -38,15 +38,19 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
   - Capped to **100 rows** for snappy rendering, with “And X more rows…” if needed.
   - **Deep links** to edit each zone and method.
 
-- **Custom Rules Scanner (AST)**
-  - Parses specific theme files to find shipping-related code and explains what it likely does in plain English.
-  - Detects and describes:
-    - `add_filter( 'woocommerce_package_rates', … )`
-    - `add_action( 'woocommerce_cart_calculate_fees', … )`
+- **Custom Rules Scanner (AST)** - **Focused on Geographical & Payment Restrictions**
+  - Parses specific theme files to find geographical location and payment method restrictions and explains what they do in plain English.
+  - **Geographical Restrictions** - Detects and describes:
+    - Location-based shipping rate filtering (city, state, zip, country)
+    - `unset( $rates[...] )` when based on geographical conditions
     - `unset( $rates[...] )` (with context such as *“when the rate is Free Shipping and subtotal is under $20”*).
-    - `new WC_Shipping_Rate(...)` (shows id/label/cost and when it runs).
-    - `$cart->add_fee(...)` (fee name, amount, and conditions).
-    - `$errors->add(...)` (checkout validation messages that block checkout).
+    - Custom shipping rates for specific locations
+    - Checkout validation based on shipping addresses
+  - **Payment Method Restrictions** - Detects and describes:
+    - Payment gateway filtering (American Express, specific gateways)
+    - `add_filter( 'woocommerce_available_payment_gateways', … )`
+    - Payment method restrictions based on location or cart contents
+    - Checkout validation for payment methods
   - **Automatic parser self-test** runs on page load and shows a green notice if PHP-Parser is available and working.
 
 - **One-Click, Server-Friendly CSV Export**
@@ -62,7 +66,7 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
 3. **Migrating / Staging:** Use the CSV + preview as a definitive checklist for replication.  
 4. **Troubleshooting:** Quickly verify if Free Shipping should appear for a given subtotal.  
 5. **Onboarding / Training:** Explain the store’s shipping logic to new teammates or clients.  
-6. **Code Visibility:** Understand custom theme logic that modifies shipping without reading the entire codebase.
+6. **Code Visibility:** Understand custom geographical restrictions and payment method filtering without reading the entire codebase.
 
 > **Note:** This is an **export and visibility** tool. It does **not** import settings.
 
