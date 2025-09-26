@@ -2,6 +2,11 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.2
+* Docs: Added PROJECT-SELFTESTS.md outlining a clean-room self-test plan split into Basic and Advanced phases, with actionable checklists.
+* Planning: Identified AJAX flakiness causes (duplicate handler registration, inconsistent nonce/capability checks) and defined a single-dispatcher model to implement next. No runtime logic changes in this version.
+
+
 ## 2.7.1
 * **Fix:** Resolved Self-Test AJAX errors by fixing plugin instantiation and improving permission checks
   * Fixed missing plugin class instantiation that prevented AJAX handlers from being registered
