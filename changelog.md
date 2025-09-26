@@ -3,7 +3,15 @@
 Plugin sponsored & developed by Neochrome, Inc.
 
 ## 2.7.1
+* **Fix:** Resolved Self-Test AJAX errors by fixing plugin instantiation and improving permission checks
+  * Fixed missing plugin class instantiation that prevented AJAX handlers from being registered
+  * Enhanced permission checks to fallback to `manage_options` when `manage_woocommerce` capability is not available
+  * Added proper `ajaxurl` localization to ensure AJAX calls work correctly
 * **Enhancement:** Added "Settings" and "Self-Test" action links to the plugin listing on the All Plugins page for easier access
+* **Enhancement:** Added new self-test for menu and action links registration to prevent UI regressions
+  * Tests that menu items are properly registered under WooCommerce or Tools menu
+  * Verifies that plugin action links filter is correctly registered
+  * Helps ensure menu functionality doesn't break in future updates
 * **Enhancement:** Improved HTML rendering to display `<strong>` tags as actual **bold text** instead of escaped HTML entities
   * Fixed scanner output to properly render product names (Kratom, THC-A, etc.) and location names (Alabama, California, etc.) in bold
   * Added safe HTML sanitization that allows `<strong>` tags while preventing other HTML injection

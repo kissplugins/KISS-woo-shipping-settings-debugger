@@ -14,7 +14,14 @@ define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 
 require_once __DIR__ . '/preview-trait.php';
 require_once __DIR__ . '/scanner-trait.php';
+
+// Debug: Log that we're about to load self-test.php
+error_log('KISS_WSE: About to load self-test.php');
 require_once __DIR__ . '/self-test.php';
+error_log('KISS_WSE: self-test.php loaded successfully');
+
+// Load standalone AJAX handlers
+require_once __DIR__ . '/ajax-handlers.php';
 
 
 // Shared helper: sanitize a CSV cell to prevent formula injection
@@ -328,10 +335,14 @@ class KISS_WSE_Debugger {
     private ?\PhpParser\Parser $parser;
 
     public function __construct(?\PhpParser\Parser $parser = null) {
+        error_log('KISS_WSE: Constructor called');
+
         // Load PHP-Parser
         if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+            error_log('KISS_WSE: PHP-Parser not found, trying to load');
             $this->maybe_require_parser_loader();
         } else {
+            error_log('KISS_WSE: PHP-Parser found, creating parser');
             $this->parser = $parser ?? $this->create_parser();
         }
 
@@ -340,6 +351,20 @@ class KISS_WSE_Debugger {
         add_action( 'admin_menu', [ $this, 'register_menu' ] );
         add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
         add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
+
+        // Register AJAX handlers for self-test functionality using init hook
+        add_action( 'init', [ $this, 'register_ajax_handlers' ] );
+    }
+
+    /**
+     * Register AJAX handlers for self-test functionality
+     */
+    public function register_ajax_handlers() {
+        error_log('KISS_WSE: register_ajax_handlers called');
+        add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
+        add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+        add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
+        error_log('KISS_WSE: AJAX handlers registered in register_ajax_handlers method');
     }
 
     /**
@@ -636,9 +661,26 @@ class KISS_WSE_Debugger {
 if ( class_exists( 'KISS_WSE_Debugger' ) ) {
     // Hook into WordPress initialization to ensure proper loading
     add_action( 'plugins_loaded', function() {
-        new KISS_WSE_Debugger();
+        error_log('KISS_WSE: Initializing plugin class');
+        try {
+            new KISS_WSE_Debugger();
+            error_log('KISS_WSE: Plugin class initialized successfully');
+        } catch (Exception $e) {
+            error_log('KISS_WSE: Plugin initialization error: ' . $e->getMessage());
+        } catch (Error $e) {
+            error_log('KISS_WSE: Plugin initialization fatal error: ' . $e->getMessage());
+        }
     } );
 } else {
     // Log error if class doesn't exist
     error_log( 'KISS_WSE_Debugger class not found during plugin initialization' );
 }
+
+// Register AJAX handlers using wp_loaded hook to ensure WordPress is fully loaded
+add_action( 'wp_loaded', function() {
+    error_log('KISS_WSE: wp_loaded hook called, registering AJAX handlers');
+    add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
+    add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+    add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
+    error_log('KISS_WSE: AJAX handlers registered in wp_loaded hook');
+} );
