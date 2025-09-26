@@ -3,6 +3,18 @@
  * Trait providing AST scanning utilities used by the debugger.
  */
 trait KISS_WSE_Scanner {
+
+    /**
+     * Safely allow strong tags in HTML output
+     */
+    private function allow_strong_tags( $content ) {
+        if ( function_exists( 'wp_kses' ) ) {
+            return wp_kses( $content, array( 'strong' => array() ) );
+        }
+        // Fallback: only allow <strong> and </strong> tags
+        return preg_replace( '/(<(?!\/?(strong)(?:\s|>))[^>]*>)/', '', $content );
+    }
+
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
@@ -429,7 +441,7 @@ trait KISS_WSE_Scanner {
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
-                    esc_html( $desc ),
+                    $this->allow_strong_tags( $desc ),
                     sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
@@ -449,7 +461,7 @@ trait KISS_WSE_Scanner {
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
-                    esc_html( $desc ),
+                    $this->allow_strong_tags( $desc ),
                     sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
@@ -1022,7 +1034,7 @@ trait KISS_WSE_Scanner {
                     $array_data = $file_arrays[$scope_key][$var_name];
                     if( is_array($array_data) && !empty($array_data) ) {
                         $list = $this->format_array_for_display( array_values($array_data) );
-                        return sprintf( __( 'the location is one of: %s', 'kiss-woo-shipping-debugger' ), '<strong>' . esc_html( $list ) . '</strong>' );
+                        return sprintf( __( 'the location is one of: %s', 'kiss-woo-shipping-debugger' ), $this->allow_strong_tags( '<strong>' . esc_html( $list ) . '</strong>' ) );
                     }
                 }
             }
