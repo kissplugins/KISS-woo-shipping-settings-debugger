@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.6.0
+ * Version:     2.7.1
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -335,7 +335,8 @@ class KISS_WSE_Debugger {
             $this->parser = $parser ?? $this->create_parser();
         }
 
-        add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
+        $plugin_basename = plugin_basename( KISS_WSE_PLUGIN_FILE );
+        add_filter( 'plugin_action_links_' . $plugin_basename, [ $this, 'add_action_links' ] );
         add_action( 'admin_menu', [ $this, 'register_menu' ] );
         add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
         add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
@@ -358,12 +359,19 @@ class KISS_WSE_Debugger {
     }
 
     /**
-     * Add a convenient settings link on the plugins page.
+     * Add convenient action links on the plugins page.
      */
     public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
-        $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
-        array_unshift( $links, "<a href=\"$url\">$text</a>" );
+        // Main settings/debugger link
+        $settings_url = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
+        $settings_text = esc_html__( 'Settings', 'kiss-woo-shipping-debugger' );
+        array_unshift( $links, "<a href=\"$settings_url\">$settings_text</a>" );
+
+        // Self-test link for quick access
+        $test_url = esc_url( admin_url( 'admin.php?page=kiss-wse-self-test' ) );
+        $test_text = esc_html__( 'Self-Test', 'kiss-woo-shipping-debugger' );
+        array_unshift( $links, "<a href=\"$test_url\">$test_text</a>" );
+
         return $links;
     }
 
@@ -371,15 +379,28 @@ class KISS_WSE_Debugger {
      * Register the Tools submenu page for the debugger UI.
      */
     public function register_menu(): void {
-        // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
-        add_submenu_page(
-            'woocommerce',
-            __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
-            'manage_woocommerce',
-            $this->page_slug,
-            [ $this, 'render_page' ]
-        );
+        // Check if WooCommerce is active before adding to WooCommerce menu
+        if ( class_exists( 'WooCommerce' ) ) {
+            // Add to WooCommerce menu
+            add_submenu_page(
+                'woocommerce',
+                __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                'manage_woocommerce',
+                $this->page_slug,
+                [ $this, 'render_page' ]
+            );
+        } else {
+            // Fallback to Tools menu if WooCommerce is not active
+            add_submenu_page(
+                'tools.php',
+                __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                'manage_options',
+                $this->page_slug,
+                [ $this, 'render_page' ]
+            );
+        }
     }
 
     /**
@@ -609,7 +630,15 @@ class KISS_WSE_Debugger {
 
         fclose( $out );
     }
+}
 
-
-
+// Initialize the plugin
+if ( class_exists( 'KISS_WSE_Debugger' ) ) {
+    // Hook into WordPress initialization to ensure proper loading
+    add_action( 'plugins_loaded', function() {
+        new KISS_WSE_Debugger();
+    } );
+} else {
+    // Log error if class doesn't exist
+    error_log( 'KISS_WSE_Debugger class not found during plugin initialization' );
 }
