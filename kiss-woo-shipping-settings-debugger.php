@@ -46,7 +46,7 @@ function kiss_wse_initialize_debugger(): void {
         ));
         return;
     }
-    new KISS_WSE_Debugger();
+    new KISS_Woo_Shipping_Debugger_required_plugin();
 }
 
 /**
@@ -164,6 +164,131 @@ trait KISS_WSE_Testable {
         }
 
         return ob_get_clean();
+    }
+}
+
+class KISS_Woo_Shipping_Debugger_required_plugin {
+
+    private $required_plugin = 'WP-PHP-Parser-loader-main/php-parser-loader.php';
+    private $github_repo_zip = 'https://github.com/kissplugins/WP-PHP-Parser-loader/archive/refs/heads/main.zip';
+    private $current_plugin;
+
+    public function __construct() {
+        $this->current_plugin = plugin_basename(__FILE__);
+        add_action('admin_init', [$this, 'check_required_plugin']);
+        add_action('admin_post_kiss_install_parser_plugin', [$this, 'install_required_plugin']);
+
+    }
+
+    public function is_plugin_installed( $plugin_file ) {
+        return file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
+    }
+    /**
+     * Check if required plugin is installed/active
+     */
+    public function check_required_plugin() {
+        if ( ! current_user_can('install_plugins') ) {
+            return;
+        }
+
+        // If already active, skip
+        if ( is_plugin_active($this->required_plugin) ) {
+            new KISS_WSE_Debugger();
+            return;
+        } 
+
+        // If installed but not active → show Activate button
+        if ( file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) {
+            $activate_url = wp_nonce_url(
+                self_admin_url('plugins.php?action=activate&plugin=' . $this->required_plugin),
+                'activate-plugin_' . $this->required_plugin
+            );
+
+            echo '<div class="notice notice-warning"><p>';
+            echo 'KISS Woo Shipping Debugger requires <strong>PHP Parser Plugin</strong>. ';
+            echo '<a class="button button-primary" href="' . esc_url($activate_url) . '">Activate Plugin</a>';
+            echo '</p></div>';
+            return;
+        }
+
+        if ( !$this->is_plugin_installed( $this->required_plugin ) ) {
+            // Not installed → show install button
+            $install_url = wp_nonce_url(
+                admin_url('admin-post.php?action=kiss_install_parser_plugin'),
+                'kiss_install_parser_plugin'
+            );
+
+            echo '<div class="notice notice-error"><p>';
+            echo 'KISS Woo Shipping Debugger requires <strong>PHP Parser Plugin</strong>. ';
+            echo '<a class="button button-primary" href="' . esc_url($install_url) . '">Install Required PHP Parser Plugin</a>';
+            echo '</p></div>';
+        }
+        
+    }
+
+    /**
+     * Install required plugin from GitHub repo
+     */
+    public function install_required_plugin() {
+        if ( ! current_user_can('install_plugins') || ! check_admin_referer('kiss_install_parser_plugin') ) {
+            wp_die('Permission denied');
+        }
+
+        include_once ABSPATH . 'wp-admin/includes/file.php';
+        include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        include_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+        global $wp_filesystem;
+        if (!WP_Filesystem()) {
+            wp_die(__('Failed to initialize filesystem. Please check your server configuration.', 'kiss-woo-shipping-debugger'), __('Error', 'kiss-woo-shipping-debugger'));
+        }
+        
+        $skin = new class extends WP_Upgrader_Skin {
+            protected $silent = true;
+            public function feedback($feedback, ...$args) {}
+            public function header() {}
+            public function footer() {}
+        };
+        $upgrader = new Plugin_Upgrader($skin);
+        ob_start();
+        $result   = $upgrader->install($this->github_repo_zip);
+        if (ob_get_length()) {
+            ob_end_clean();
+        }
+
+        if ( is_wp_error($result) ) {
+            error_log('Plugin installation failed: ' . $result->get_error_message());
+        }
+
+        // Try activating after install
+        if ( file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) {
+            activate_plugin($this->required_plugin);
+        }
+
+        if (is_plugin_active($this->current_plugin) && ( !file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) ) {
+            deactivate_plugins($this->current_plugin);
+
+            // Clear cache and re-check
+            wp_cache_delete('plugins', 'plugins');
+            $active_plugins = get_option('active_plugins', []);
+            if (in_array($this->current_plugin, $active_plugins)) {
+                $active_plugins = array_diff($active_plugins, [$this->current_plugin]);
+                update_option('active_plugins', $active_plugins);
+            }
+
+            if (is_plugin_active($this->current_plugin)) {
+                error_log('Failed to deactivate ' . $this->current_plugin . ' after manual attempt');
+                wp_die(__('Failed to deactivate plugin. Please deactivate manually.', 'kiss-woo-shipping-debugger'));
+            }
+        }
+
+        if (ob_get_length()) {
+            $buffered_output = ob_get_clean();
+        }
+
+        // Redirect back to Plugins screen
+        wp_redirect(admin_url('plugins.php?plugin_status=all&message=plugin_installed_activated'));
+        exit;
     }
 }
 
