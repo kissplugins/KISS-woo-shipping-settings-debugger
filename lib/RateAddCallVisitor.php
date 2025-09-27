@@ -140,14 +140,14 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
             $this->rateCostNodes[] = $node;
         }
 
-        // 6) add_action('woocommerce_checkout_process', ...) - Only if geographical/payment relevant
+        // 6) add_action('woocommerce_checkout_process', ...)
+        // Be permissive here: these hooks are directly tied to checkout validation; include without extra keyword heuristics.
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && $node->name->toString() === 'add_action'
             && isset($node->args[0])
             && $node->args[0]->value instanceof String_
             && in_array($node->args[0]->value->value, ['woocommerce_checkout_process', 'woocommerce_after_checkout_validation'])
-            && ($this->isGeographicallyRelevant($node) || $this->isPaymentRelevant($node))
         ) {
             $this->checkoutProcessHookNodes[] = $node;
         }

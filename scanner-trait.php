@@ -695,6 +695,19 @@ trait KISS_WSE_Scanner {
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
                         ? $this->describe_callback( $node->args[1]->value )
                         : '';
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
+
+                    $summary = __( 'Examines payment method hooks or actions.', 'kiss-woo-shipping-debugger' );
+                    if ( $hook_name !== '' ) {
+                        $summary = sprintf( __( 'Examines payment method hook "%s".', 'kiss-woo-shipping-debugger' ), $hook_name );
+                    }
+                    if ( $cb ) {
+                        $summary .= ' ' . sprintf( __( 'Callback: %s.', 'kiss-woo-shipping-debugger' ), $cb );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
 
                 case 'rateCost':
                     $amount = '';

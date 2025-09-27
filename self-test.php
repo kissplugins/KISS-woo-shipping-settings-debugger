@@ -223,6 +223,8 @@ function kiss_wse_self_test_page_html() {
                 { id: 'csv_injection_guard', name: 'Security: CSV Injection Guard' },
                 { id: 'changelog_preview', name: 'UX: Changelog Preview preserves <strong> bold' },
                 { id: 'ast_shipping_rules_geo_cost', name: 'Logic: AST detects rate removal and cost changes' },
+                { id: 'ast_payment_rules', name: 'Logic: AST detects payment gateway restrictions and checkout notices' },
+                { id: 'ast_mixed_geo_payment', name: 'Logic: AST detects both geo shipping and payment restrictions' },
 
                 { id: 'menu_registration', name: 'UI: Menu & Action Links Registration' },
             ];
@@ -325,7 +327,7 @@ function kiss_wse_run_single_test_callback() {
     try {
         // Only instantiate the main class if we need it for specific tests
         $main_class = null;
-        if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic', 'ast_shipping_rules_geo_cost' ], true ) ) {
+        if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic', 'ast_shipping_rules_geo_cost', 'ast_payment_rules', 'ast_mixed_geo_payment' ], true ) ) {
             if ( class_exists( 'KISS_WSE_Debugger' ) ) {
                 $main_class = new KISS_WSE_Debugger();
             } else {
@@ -507,6 +509,68 @@ PHP;
                     wp_send_json_success( [ 'message' => 'AST: detected unset() and cost adjustment patterns.' ] );
                 } else {
                     wp_send_json_error( [ 'message' => 'AST: expected patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            case 'ast_payment_rules':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_payment_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_available_payment_gateways', function($gws){
+    $country = 'US';
+    if ($country === 'US') { unset($gws['cod']); }
+    return $gws;
+}, 10, 1);
+
+add_filter('woocommerce_gateway_title', function($title, $id){
+    if ($id === 'cod') { return 'No COD in your area'; }
+    return $title;
+}, 10, 2);
+
+add_action('woocommerce_checkout_process', function(){
+    if (function_exists('wc_add_notice')) {
+        wc_add_notice('Payment method not allowed for your region', 'error');
+    }
+});
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okGateways = (strpos($output, 'Modifies available payment gateways') !== false);
+                $okFilters  = (strpos($output, 'Examines payment method hook') !== false) || (strpos($output, 'Examines payment method hooks') !== false);
+                if ($okGateways && $okFilters) {
+                    wp_send_json_success( [ 'message' => 'AST: detected payment gateway restrictions and payment method filtering.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected payment patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            case 'ast_mixed_geo_payment':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_mixed_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_package_rates', function($rates){
+    $state = 'TX';
+    if ($state === 'TX') { unset($rates['flat_rate:1']); }
+    return $rates;
+}, 10, 1);
+
+add_filter('woocommerce_available_payment_gateways', function($gws){
+    $city = 'Dallas';
+    if ($city === 'Dallas') { unset($gws['cheque']); }
+    return $gws;
+}, 10, 1);
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okGeo      = (strpos($output, 'Removes a shipping rate by key') !== false) || (strpos($output, 'Theme code hooks into WooCommerce package rates') !== false);
+                $okGateways = (strpos($output, 'Modifies available payment gateways') !== false);
+                $okFilters  = (strpos($output, 'Examines payment method hook') !== false) || (strpos($output, 'Examines payment method hooks') !== false);
+                if ($okGeo && $okGateways && $okFilters) {
+                    wp_send_json_success( [ 'message' => 'AST: detected mixed geographical and payment restrictions.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected mixed patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
                 }
                 break;
 

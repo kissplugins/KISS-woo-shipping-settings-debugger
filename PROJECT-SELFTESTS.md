@@ -108,8 +108,8 @@ Scanner correctness and formatting fidelity.
 
 - [x] Active theme scan targeting: default scan includes active child theme’s inc/shipping-restrictions.php if present; additional file constrained to same inc/ directory (realpath clamp).
 - [x] AST detection – shipping rules: detect unsetting of shipping methods and rate cost alterations under conditions.
-- [ ] AST detection – payment rules: detect payment-gateway filtering, gateway title/description changes, checkout notices, and custom/related checkout payment hooks (per test-payment-functions.php).
-- [ ] Mixed logic: detect geographical + payment restrictions in the same fixture (per test-focused-scanner.php) while ignoring non-signal hooks.
+- [x] AST detection – payment rules: detect payment-gateway filtering, gateway title/description changes, checkout notices, and custom/related checkout payment hooks (per test-payment-functions.php).
+- [x] Mixed logic: detect geographical + payment restrictions in the same fixture (per test-focused-scanner.php) while ignoring non-signal hooks.
 - [ ] Product- and location-term-driven logic: detect Kratom, Amanita Mushroom, THC-A rules; do not over-filter meaningful messages.
 - [ ] Bold formatting fidelity: retain <strong> for product and State/City/County names; sanitize other HTML safely (wp_kses allowlist for <strong>).
 - [ ] Array/placeholder resolution: replace placeholders like {restricted_states} with human-friendly lists when resolvable.

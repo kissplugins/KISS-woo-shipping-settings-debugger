@@ -2,6 +2,18 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+
+## 2.7.8
+* Self-Test: Added "AST detects payment gateway restrictions and checkout notices".
+* Self-Test: Added "AST detects both geo shipping and payment restrictions".
+* Docs: Phase 2.0 payment and mixed-logic verification initiated.
+
+
+## 2.7.9
+* Scanner: Fixed description fall-through for paymentFilters; now correctly summarizes payment method hooks.
+* Scanner: Loosened checkout validation hook detection (woocommerce_checkout_process/after_checkout_validation) so they are included without extra heuristics.
+* Self-Test: Relaxed expectations to match sanitized description output from scan_single_file_for_test.
+
 ## 2.7.7
 * Phase 2.0: Active theme scan targets inc/ by default; additional file input is now clamped to the theme’s inc/ directory.
 * Scanner: Detects shipping rate cost adjustments (->cost assignments and set_cost()) under geographical conditions, in addition to existing unset($rates[...]).
