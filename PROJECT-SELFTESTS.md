@@ -10,6 +10,7 @@ This document has four sub-phases with actionable checklists:
 
 ## Table of Contents
 - Overview and Goals
+- Status & Next Steps (as of 2.7.5)
 - What Exists Today (extracted from code)
 - Evaluation of Current Self-Tests
 - Phase 1.0: Basic Wiring Tests (Checklist)
@@ -19,6 +20,23 @@ This document has four sub-phases with actionable checklists:
 - PHPDoc Guidelines for Self-Tests
 - Clean-Room Test Dispatch Model
 - How We’ll Use This Doc in Code Changes
+## Status & Next Steps (as of 2.7.5)
+- Phase 1.0: Completed in v2.7.5
+  - Single dispatcher with consistent nonce + capability fallback
+  - AJAX endpoint pinned to admin-ajax.php and admin notices suppressed during AJAX
+  - Fixed null-class fatals by instantiating main class for tests that require it
+  - Menu test adjusted to validate callbacks in admin-ajax context
+- Phase 1.5: In progress — targeted for v2.7.6
+  - Verify changelog preview renders sanitized HTML while preserving <strong> in intended places
+  - Add on-page diagnostic indicator to detect duplicate AJAX handler registrations
+  - Ensure CSV injection guard smoke test passes via dispatcher (continue to validate headers + sanitization)
+  - Keep UI debug badges showing action registration and capability detection
+- Phase 2.0: Planned
+  - Deep scanner correctness, array/placeholder resolution, grouping modes, bold formatting fidelity
+- Phase 2.5: Planned
+  - Performance envelopes, CSV export rate limiting, and security regressions
+
+
 
 ## Overview and Goals
 - Ensure AJAX self-tests are reliable and simple: a single dispatcher, pure tests, stable capability/nonce behavior.
@@ -69,10 +87,12 @@ Conclusion: A clean-room rebuild should centralize registration to a single poin
 ## Phase 1.0: Basic Wiring Tests (Checklist)
 Environment and wiring sanity checks. These should all run via a single dispatcher action (e.g., kiss_wse_run_single_test) with minimal side effects.
 
-- [ ] AJAX connectivity: POST to wp_ajax action responds with a structured JSON success payload.
-- [ ] Capability fallback: current_user_can('manage_woocommerce') OR current_user_can('manage_options') pass policy behaves as designed (reject otherwise).
-- [ ] Nonce policy: requests require a valid nonce tied to this test suite; failures return clear JSON errors.
-- [ ] Dependency presence: WooCommerce classes and PHP-Parser classes are detectable (with helpful guidance if missing).
+Attn LLM: Please mark checkboxes upon completion.
+
+- [x] AJAX connectivity: POST to wp_ajax action responds with a structured JSON success payload.
+- [x] Capability fallback: current_user_can('manage_woocommerce') OR current_user_can('manage_options') pass policy behaves as designed (reject otherwise).
+- [x] Nonce policy: requests require a valid nonce tied to this test suite; failures return clear JSON errors.
+- [x] Dependency presence: WooCommerce classes and PHP-Parser classes are detectable (with helpful guidance if missing).
 
 ## Phase 1.5: Basic Integration & UX Tests (Checklist)
 Admin UI and integration checks.

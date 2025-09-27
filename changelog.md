@@ -7,6 +7,7 @@ Plugin sponsored & developed by Neochrome, Inc.
 * Fix: Made Self-Test AJAX fully robust by pinning endpoint to admin-ajax.php and suppressing admin notices during AJAX.
 * Test: Reworked “Menu & Action Links Registration” to validate callback presence in admin-ajax context (no menu globals needed).
 * DX: Consistent handler registration during AJAX without side-effect instantiation.
+* Docs: Updated PROJECT-SELFTESTS.md with Status & Next Steps for v2.7.6.
 
 
 ## 2.7.4
