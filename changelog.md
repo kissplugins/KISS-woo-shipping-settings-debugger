@@ -2,6 +2,13 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.7
+* Phase 2.0: Active theme scan targets inc/ by default; additional file input is now clamped to the theme’s inc/ directory.
+* Scanner: Detects shipping rate cost adjustments (->cost assignments and set_cost()) under geographical conditions, in addition to existing unset($rates[...]).
+* Self-Test: Added “AST detects rate removal and cost changes” test.
+* Docs: PROJECT-SELFTESTS updated to tick first two Phase 2.0 items.
+
+
 ## 2.7.6
 * UX: Changelog preview now preserves <strong>bold</strong> in fallback mode (minimal Markdown-to-HTML for **bold** only, sanitized).
 * QA: Added self-test “changelog_preview” to verify <strong> rendering is preserved.

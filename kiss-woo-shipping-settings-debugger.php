@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.7.6
+ * Version:     2.7.7
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -142,6 +142,7 @@ trait KISS_WSE_Testable {
 
         $sections = [
             'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+            'rateCost'    => $rate_visitor->getRateCostNodes(),
             'newRates'    => $rate_visitor->getNewRateNodes(),
             'errors'      => $rate_visitor->getErrorAddNodes(),
             'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),

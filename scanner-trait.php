@@ -132,7 +132,10 @@ trait KISS_WSE_Scanner {
                                     echo 'Duplicate check: ' . ( in_array( $normalized_candidate, $normalized_files, true ) ? 'DUPLICATE FOUND' : 'UNIQUE FILE' ) . '<br>';
                                     echo '</details>'; // Close debug section
 
-                                    if ( ! in_array( $normalized_candidate, $normalized_files, true ) ) {
+                                    $inc_norm = rtrim( wp_normalize_path( $base_real ), '/\\' ) . '/inc/';
+                                    if ( strpos( $normalized_candidate, $inc_norm ) !== 0 ) {
+                                        echo '<div class="notice notice-warning" style="margin: 10px 0;"><p>' . esc_html__( 'Additional file must be inside the active theme inc/ directory.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                                    } elseif ( ! in_array( $normalized_candidate, $normalized_files, true ) ) {
                                         $files_to_scan[] = $normalized_candidate;
                                         echo '<div class="notice notice-success" style="margin: 10px 0;"><p>';
                                         echo '<strong>✅ ' . esc_html__( 'Additional file added for scanning:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
@@ -257,6 +260,7 @@ trait KISS_WSE_Scanner {
             $sections = [
                 'errors'      => $rate_visitor->getErrorAddNodes(),
                 'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+                'rateCost'    => $rate_visitor->getRateCostNodes(),
                 'filterHooks' => $rate_visitor->getFilterHookNodes(),
                 'rateCalls'   => $rate_visitor->getAddRateNodes(),
                 'newRates'    => $rate_visitor->getNewRateNodes(),
@@ -497,6 +501,8 @@ trait KISS_WSE_Scanner {
     private function short_explanation_label( string $key ): string {
         switch ( $key ) {
             case 'filterHooks': return __( 'Geographical shipping rate filtering', 'kiss-woo-shipping-debugger' );
+            case 'rateCost':    return __( 'Shipping rate cost adjusted', 'kiss-woo-shipping-debugger' );
+
             case 'rateCalls':   return __( 'Location-based custom rate', 'kiss-woo-shipping-debugger' );
             case 'newRates':    return __( 'Location-based rate object', 'kiss-woo-shipping-debugger' );
             case 'unsetRates':  return __( 'Geographical rate removal', 'kiss-woo-shipping-debugger' );
@@ -664,6 +670,7 @@ trait KISS_WSE_Scanner {
                         $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
                     }
                     if ( $when !== '' ) {
+
                         $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
                     }
                     return $summary;
@@ -688,6 +695,28 @@ trait KISS_WSE_Scanner {
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
                         ? $this->describe_callback( $node->args[1]->value )
                         : '';
+
+                case 'rateCost':
+                    $amount = '';
+                    if ($node instanceof \PhpParser\Node\Expr\Assign) {
+                        $amount = $this->simple_expr_text($node->expr, $collected_arrays, $current_file);
+                    } elseif ($node instanceof \PhpParser\Node\Expr\MethodCall && isset($node->args[0])) {
+                        if ($node->args[0]->value instanceof \PhpParser\Node\Expr\Variable) {
+                            $amount = $this->describe_variable_assignment($node->args[0]->value);
+                        } else {
+                            $amount = $this->simple_expr_text($node->args[0]->value, $collected_arrays, $current_file);
+                        }
+                    }
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
+                    $summary = __( 'Adjusts a shipping rate cost.', 'kiss-woo-shipping-debugger' );
+                    if ( $amount !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'New cost: %s.', 'kiss-woo-shipping-debugger' ), esc_html( $amount ) );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
+
                     $summary = __( 'Payment-related action hook.', 'kiss-woo-shipping-debugger' );
                     if ( $hook_name !== '' ) {
                         $summary = sprintf( __( 'Hooks into "%s" for payment processing.', 'kiss-woo-shipping-debugger' ), $hook_name );

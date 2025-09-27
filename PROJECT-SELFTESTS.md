@@ -106,8 +106,8 @@ Admin UI and integration checks.
 ## Phase 2.0: Advanced Logic Tests (Checklist)
 Scanner correctness and formatting fidelity.
 
-- [ ] Active theme scan targeting: default scan includes active child theme’s inc/shipping-restrictions.php if present; additional file constrained to same inc/ directory (realpath clamp).
-- [ ] AST detection – shipping rules: detect unsetting of shipping methods and rate cost alterations under conditions.
+- [x] Active theme scan targeting: default scan includes active child theme’s inc/shipping-restrictions.php if present; additional file constrained to same inc/ directory (realpath clamp).
+- [x] AST detection – shipping rules: detect unsetting of shipping methods and rate cost alterations under conditions.
 - [ ] AST detection – payment rules: detect payment-gateway filtering, gateway title/description changes, checkout notices, and custom/related checkout payment hooks (per test-payment-functions.php).
 - [ ] Mixed logic: detect geographical + payment restrictions in the same fixture (per test-focused-scanner.php) while ignoring non-signal hooks.
 - [ ] Product- and location-term-driven logic: detect Kratom, Amanita Mushroom, THC-A rules; do not over-filter meaningful messages.

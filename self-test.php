@@ -222,6 +222,8 @@ function kiss_wse_self_test_page_html() {
                 { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' },
                 { id: 'csv_injection_guard', name: 'Security: CSV Injection Guard' },
                 { id: 'changelog_preview', name: 'UX: Changelog Preview preserves <strong> bold' },
+                { id: 'ast_shipping_rules_geo_cost', name: 'Logic: AST detects rate removal and cost changes' },
+
                 { id: 'menu_registration', name: 'UI: Menu & Action Links Registration' },
             ];
 
@@ -323,7 +325,7 @@ function kiss_wse_run_single_test_callback() {
     try {
         // Only instantiate the main class if we need it for specific tests
         $main_class = null;
-        if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic' ], true ) ) {
+        if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic', 'ast_shipping_rules_geo_cost' ], true ) ) {
             if ( class_exists( 'KISS_WSE_Debugger' ) ) {
                 $main_class = new KISS_WSE_Debugger();
             } else {
@@ -471,7 +473,43 @@ function kiss_wse_run_single_test_callback() {
                 if ($test_file_path && file_exists($test_file_path)) {
                     unlink($test_file_path);
                 }
+
             }
+                break;
+
+            case 'ast_shipping_rules_geo_cost':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_geo_cost_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_package_rates', function($rates){
+    $state = 'OR';
+    if ($state === 'OR') {
+        unset($rates['free_shipping:1']);
+    }
+    foreach ($rates as $rid => $rate) {
+        if (method_exists($rate, 'set_cost')) {
+            $rate->set_cost(5);
+        } else {
+            if (isset($rates[$rid]) && property_exists($rates[$rid], 'cost')) {
+                $rates[$rid]->cost = 5;
+            }
+        }
+    }
+    return $rates;
+}, 10, 1);
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okUnset = (strpos($output, 'Geographical rate removal') !== false) || (strpos($output, 'Removes') !== false);
+                $okCost  = (strpos($output, 'Shipping rate cost adjusted') !== false) || (strpos($output, 'Adjusts a shipping rate cost') !== false);
+                if ($okUnset && $okCost) {
+                    wp_send_json_success( [ 'message' => 'AST: detected unset() and cost adjustment patterns.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
         case 'csv_injection_guard':
             $inputs = ['=1+1','+foo','-bar','@SUM(A1:A2)','hello','123'];
             $fallback = function($v){ $s=(string)$v; return ($s!=='' && in_array($s[0],['=','+','-','@'],true)) ? "'".$s : $s; };
