@@ -2,16 +2,21 @@
 
 Purpose: Rebuild the plugin’s self-tests using a clean-room approach that is deterministic, AJAX-reliable, and focused on verifying the plugin’s core functionality (scanning, formatting, UX hooks) without depending on WooCommerce runtime flows beyond what’s necessary.
 
-This document has two phases with actionable checklists:
-- Basic Tests (smoke and environment validation)
-- Advanced Tests (scanner logic, formatting fidelity, performance, security)
+This document has four sub-phases with actionable checklists:
+- Phase 1.0: Basic Wiring Tests (smoke and environment validation)
+- Phase 1.5: Basic Integration & UX Tests (admin UI and registration sanity)
+- Phase 2.0: Advanced Logic Tests (scanner logic and formatting fidelity)
+- Phase 2.5: Advanced Performance & Security (performance envelope, rate limiting, security)
 
 ## Table of Contents
 - Overview and Goals
 - What Exists Today (extracted from code)
 - Evaluation of Current Self-Tests
-- Phase 1: Basic Tests (Checklist)
-- Phase 2: Advanced Tests (Checklist)
+- Phase 1.0: Basic Wiring Tests (Checklist)
+- Phase 1.5: Basic Integration & UX Tests (Checklist)
+- Phase 2.0: Advanced Logic Tests (Checklist)
+- Phase 2.5: Advanced Performance & Security (Checklist)
+- PHPDoc Guidelines for Self-Tests
 - Clean-Room Test Dispatch Model
 - How We’ll Use This Doc in Code Changes
 
@@ -61,19 +66,25 @@ Core files relevant to self-tests:
 
 Conclusion: A clean-room rebuild should centralize registration to a single point, use one dispatcher with small pure tests, and enforce a consistent security pattern (nonce + capability fallback behavior) while keeping results deterministic.
 
-## Phase 1: Basic Tests (Checklist)
+## Phase 1.0: Basic Wiring Tests (Checklist)
 Environment and wiring sanity checks. These should all run via a single dispatcher action (e.g., kiss_wse_run_single_test) with minimal side effects.
 
 - [ ] AJAX connectivity: POST to wp_ajax action responds with a structured JSON success payload.
 - [ ] Capability fallback: current_user_can('manage_woocommerce') OR current_user_can('manage_options') pass policy behaves as designed (reject otherwise).
 - [ ] Nonce policy: requests require a valid nonce tied to this test suite; failures return clear JSON errors.
-- [ ] Menu & action links registered: WooCommerce submenu exists; plugin action links filter for this plugin basename is registered.
 - [ ] Dependency presence: WooCommerce classes and PHP-Parser classes are detectable (with helpful guidance if missing).
+
+## Phase 1.5: Basic Integration & UX Tests (Checklist)
+Admin UI and integration checks.
+
+- [ ] Menu & action links registered: WooCommerce submenu exists; plugin action links filter for this plugin basename is registered.
 - [ ] Changelog preview: changelog.md render helper returns sanitized HTML and does not escape <strong> tags (i.e., bolding preserved where intended).
 - [ ] CSV injection guard (basic): exporter sanitizes fields and emits safe CSV headers; smoke-test returns PASS without emitting file data.
+- [ ] Self-Test page localizes ajaxurl and shows debug indicators for action registration and capabilities.
+- [ ] No duplicate AJAX handlers registered (diagnostic/visual confirmation on Self-Test page).
 
-## Phase 2: Advanced Tests (Checklist)
-Scanner correctness, formatting fidelity, performance, and security nuances.
+## Phase 2.0: Advanced Logic Tests (Checklist)
+Scanner correctness and formatting fidelity.
 
 - [ ] Active theme scan targeting: default scan includes active child theme’s inc/shipping-restrictions.php if present; additional file constrained to same inc/ directory (realpath clamp).
 - [ ] AST detection – shipping rules: detect unsetting of shipping methods and rate cost alterations under conditions.
@@ -83,10 +94,23 @@ Scanner correctness, formatting fidelity, performance, and security nuances.
 - [ ] Bold formatting fidelity: retain <strong> for product and State/City/County names; sanitize other HTML safely (wp_kses allowlist for <strong>).
 - [ ] Array/placeholder resolution: replace placeholders like {restricted_states} with human-friendly lists when resolvable.
 - [ ] Grouping modes: “Product” vs “Functional” grouping both render without error and align on counts.
+
+## Phase 2.5: Advanced Performance & Security (Checklist)
+Performance and security nuances.
+
 - [ ] Performance envelope: simple snippet scan < 100ms; moderate fixtures < ~2s; explicit error if exceeded (no white screen/timeouts).
 - [ ] CSV export rate limiting: respects configured window; returns clear error when rate limit hit.
 - [ ] Security regressions: ensure CSV export and test endpoints enforce nonce, capability fallback, and do not leak sensitive data.
 - [ ] Stable registration: AJAX actions are registered once, from one place, avoiding duplicates/races.
+
+## PHPDoc Guidelines for Self-Tests
+All self-test server-side code must include PHPDoc blocks:
+
+- [ ] Each test function includes a summary, @since 2.7.3, and @internal tags.
+- [ ] Each test function documents parameters (e.g., @param array $request) and return type (@return array { pass: bool, message: string, details?: array }).
+- [ ] Note any side effects (e.g., temporary files) and ensure cleanup is documented and implemented.
+- [ ] Document security expectations: required capability (manage_woocommerce || manage_options) and nonce requirement.
+- [ ] Dispatcher handler PHPDoc describes action name, capability checks, nonce usage, and response format.
 
 ## Clean-Room Test Dispatch Model
 - Single server-side dispatcher: wp_ajax action kiss_wse_run_single_test.

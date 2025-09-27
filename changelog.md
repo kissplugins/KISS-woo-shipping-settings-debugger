@@ -2,6 +2,11 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.3
+* Docs: Split self-test plan phases into 1.0/1.5 and 2.0/2.5 for finer-grained focus and troubleshooting.
+* Docs: Added PHPDoc guidelines requirement for all self-test functions and dispatcher handlers.
+
+
 ## 2.7.2
 * Docs: Added PROJECT-SELFTESTS.md outlining a clean-room self-test plan split into Basic and Advanced phases, with actionable checklists.
 * Planning: Identified AJAX flakiness causes (duplicate handler registration, inconsistent nonce/capability checks) and defined a single-dispatcher model to implement next. No runtime logic changes in this version.
