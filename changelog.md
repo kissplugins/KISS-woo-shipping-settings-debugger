@@ -2,6 +2,13 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.5
+* Fix: Prevented null-class fatals in self-tests by instantiating the main debugger for tests that require it (warning logic and AST scanner).
+* Fix: Made Self-Test AJAX fully robust by pinning endpoint to admin-ajax.php and suppressing admin notices during AJAX.
+* Test: Reworked “Menu & Action Links Registration” to validate callback presence in admin-ajax context (no menu globals needed).
+* DX: Consistent handler registration during AJAX without side-effect instantiation.
+
+
 ## 2.7.4
 * Fix: Self-Test AJAX handlers now use non-die nonce verification to return structured JSON errors instead of transport failures.
 * Fix: Removed duplicate AJAX registrations and the external ajax-handlers include to eliminate registration conflicts.
