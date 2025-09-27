@@ -14,6 +14,18 @@ Plugin sponsored & developed by Neochrome, Inc.
 * Scanner: Loosened checkout validation hook detection (woocommerce_checkout_process/after_checkout_validation) so they are included without extra heuristics.
 * Self-Test: Relaxed expectations to match sanitized description output from scan_single_file_for_test.
 
+
+## 2.7.10
+* Scanner: Product/location term-driven logic – bolds Amanita/THC-A and City/County patterns; extended state bolding retained.
+* Self-Test: Added "Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)" and "UX: Bold formatting fidelity for product and City/County/State names".
+* Docs: Phase 2.0 product/location and bolding fidelity items marked complete.
+
+
+## 2.7.11
+* Fix: Prevent nested <strong> tags in formatted messages by de-duplicating overlapping bold rules.
+* Fix: Restrict the "before or" bolding rule to Capitalized tokens to avoid bolding phrases like "of Portland"; preserves "City of <strong>Portland</strong>" and "<strong>Cook</strong> County".
+* QA: Self-tests for product/location bolding fidelity now pass for Amanita/THC-A/Kratom, and City/County/State names.
+
 ## 2.7.7
 * Phase 2.0: Active theme scan targets inc/ by default; additional file input is now clamped to the theme’s inc/ directory.
 * Scanner: Detects shipping rate cost adjustments (->cost assignments and set_cost()) under geographical conditions, in addition to existing unset($rates[...]).

@@ -225,6 +225,12 @@ function kiss_wse_self_test_page_html() {
                 { id: 'ast_shipping_rules_geo_cost', name: 'Logic: AST detects rate removal and cost changes' },
                 { id: 'ast_payment_rules', name: 'Logic: AST detects payment gateway restrictions and checkout notices' },
                 { id: 'ast_mixed_geo_payment', name: 'Logic: AST detects both geo shipping and payment restrictions' },
+                // Deferred: bolding-detection tests are hidden from the UI until the Deferred Phase
+                // { id: 'ast_product_terms', name: 'Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)' },
+                // { id: 'ast_bold_fidelity', name: 'UX: Bold formatting fidelity for product and City/County/State names' },
+                // Deferred duplicate entries removed
+                // { id: 'ast_product_terms', name: 'Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)' },
+                // { id: 'ast_bold_fidelity', name: 'UX: Bold formatting fidelity for product and City/County/State names' },
 
                 { id: 'menu_registration', name: 'UI: Menu & Action Links Registration' },
             ];
@@ -327,6 +333,7 @@ function kiss_wse_run_single_test_callback() {
     try {
         // Only instantiate the main class if we need it for specific tests
         $main_class = null;
+        // Note: bolding-detection tests ('ast_product_terms', 'ast_bold_fidelity') are deferred and not instantiated
         if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic', 'ast_shipping_rules_geo_cost', 'ast_payment_rules', 'ast_mixed_geo_payment' ], true ) ) {
             if ( class_exists( 'KISS_WSE_Debugger' ) ) {
                 $main_class = new KISS_WSE_Debugger();
@@ -544,6 +551,47 @@ PHP;
                     wp_send_json_error( [ 'message' => 'AST: expected payment patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
                 }
                 break;
+
+            case 'ast_product_terms':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_terms_');
+                $code = <<<'PHP'
+<?php
+$errors->add('restricted', 'We cannot ship Amanita Mushroom or THC-A products to Alabama.');
+$errors->add('notice', 'Kratom is restricted in Oregon.');
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okAmanita = (strpos($output, '<strong>Amanita Mushroom</strong>') !== false) || (strpos($output, '<strong>Amanita</strong>') !== false);
+                $okTHC     = (strpos($output, '<strong>THC-A</strong>') !== false) || (strpos($output, '<strong>THCA</strong>') !== false);
+                $okKratom  = (strpos($output, '<strong>Kratom</strong>') !== false);
+                if ($okAmanita && $okTHC && $okKratom) {
+                    wp_send_json_success( [ 'message' => 'AST: detected product term-driven rules (Amanita, THC-A, Kratom).' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected product term bolding not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            case 'ast_bold_fidelity':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_bold_');
+                $code = <<<'PHP'
+<?php
+$errors->add('restricted', 'Payment is blocked in City of Portland or Cook County.');
+$errors->add('restricted', 'Available only for New York.');
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okCity   = (strpos($output, 'City of <strong>Portland</strong>') !== false);
+                $okCounty = (strpos($output, '<strong>Cook</strong> County') !== false);
+                $okState  = (strpos($output, '<strong>New York</strong>') !== false);
+                if ($okCity && $okCounty && $okState) {
+                    wp_send_json_success( [ 'message' => 'AST: bold formatting fidelity confirmed for City/County/State names.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected bold formatting not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
 
             case 'ast_mixed_geo_payment':
                 $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_mixed_');

@@ -516,6 +516,16 @@ trait KISS_WSE_Scanner {
 
     /**
      * Helper function to apply bolding rules to error messages.
+     *
+     * IMPORTANT: Do not refactor away the explicit <strong>-preservation behavior.
+     * - Product names (e.g., Kratom, Amanita, THC-A/THCA) and State/City/County names
+     *   must remain bolded in the final rendered output for readability.
+     * - Sanitization elsewhere should continue to allow only <strong> tags for safety.
+     * - Tests that assert on bolding fidelity are currently DEFERRED; however, this
+     *   formatting is part of the user-facing contract and should be preserved.
+     *
+     * If you need to modify this logic, update the Deferred Phase tests in
+     * PROJECT-SELFTESTS.md accordingly.
      */
     private function format_error_message( string $message ): string {
         // ReDoS hardening: truncate and adjust PCRE limits just for formatting
@@ -528,10 +538,10 @@ trait KISS_WSE_Scanner {
         @ini_set( 'pcre.backtrack_limit', '100000' );
         @ini_set( 'pcre.recursion_limit', '100000' );
 
-        // 1. Bold specific, high-priority keywords
+        // 1. Bold specific, high-priority keywords (products)
         $message = str_ireplace(
-            ['Kratom'], // Oregon is handled by the state rule below
-            ['<strong>Kratom</strong>'],
+            ['Kratom', 'Amanita Mushroom', 'Amanita', 'THC-A', 'THCA'],
+            ['<strong>Kratom</strong>', '<strong>Amanita Mushroom</strong>', '<strong>Amanita</strong>', '<strong>THC-A</strong>', '<strong>THCA</strong>'],
             $message
         );
 
@@ -542,9 +552,29 @@ trait KISS_WSE_Scanner {
             $message
         );
 
-        // ADDED: Handle product names that appear before "or"
+        // Also bold single/two-word product tokens before "or" (only capitalized tokens to avoid bolding phrases like "of Portland")
         $message = preg_replace(
-            '/(\b[\w-]+(?:\s[\w-]+)?)\s+(or)\b/i',
+            '/\b([A-Z][\w-]*(?:\s[A-Z][\w-]*)?)\s+(or)\b/u',
+            '<strong>$1</strong> $2',
+            $message
+        );
+
+        // 2b. Bold common city/county name patterns
+        // City of <Name>
+        $message = preg_replace(
+            '/\b(City of)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\b/u',
+            '$1 <strong>$2</strong>',
+            $message
+        );
+        // County of <Name>
+        $message = preg_replace(
+            '/\b(County of)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\b/u',
+            '$1 <strong>$2</strong>',
+            $message
+        );
+        // <Name> County
+        $message = preg_replace(
+            '/\b([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\s+(County)\b/u',
             '<strong>$1</strong> $2',
             $message
         );
@@ -563,6 +593,12 @@ trait KISS_WSE_Scanner {
             $message
         );
 
+        // 4. De-duplicate nested <strong> tags that can arise from multiple rules
+        $message = str_replace(['<strong><strong>','</strong></strong>'], ['<strong>','</strong>'], $message);
+
+                            // NOTE: preserve <strong>-allowed formatting for product/state/city/county names.
+                            // Bolding-fidelity tests are deferred, but this behavior is part of the UX contract.
+
         return $message;
     }
 
@@ -573,6 +609,9 @@ trait KISS_WSE_Scanner {
                     if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
                         $msg = $this->extract_string( $node->args[1]->value, $collected_arrays, $current_file );
                         if ( $msg !== '' ) {
+                            // Preserve bolding for Product and State/City/County names via format_error_message();
+                            // tests asserting bolding are deferred but this behavior is contractual UX.
+
                             $formatted_msg = $raw ? $msg : $this->format_error_message( $msg );
                             return sprintf(
                                 __( 'Adds a checkout error message: “%s”. Customers will be blocked until they resolve it.', 'kiss-woo-shipping-debugger' ),
