@@ -17,6 +17,9 @@ use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Name;
 use PhpParser\Node\Identifier;
 
+use PhpParser\Node\Expr\Assign;
+use PhpParser\Node\Expr\PropertyFetch;
+
 class RateAddCallVisitor extends NodeVisitorAbstract {
     /** @var Node[] */
     private array $addRateNodes    = [];
@@ -26,6 +29,9 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
     private array $errorAddNodes   = [];
     /** @var Node[] */
     private array $unsetRateNodes  = [];
+    /** @var Node[] */
+    private array $rateCostNodes = [];
+
     /** @var Node[] */
     private array $newRateNodes    = [];
     /** @var Node[] */
@@ -116,15 +122,32 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
         ) {
             $this->newRateNodes[] = $node;
         }
-        
-        // 6) add_action('woocommerce_checkout_process', ...) - Only if geographical/payment relevant
+
+        // 5b) Rate cost adjustments: $rate->cost = X or $rate->set_cost(X)
+        if ($node instanceof Assign
+            && $node->var instanceof PropertyFetch
+            && $node->var->name instanceof Identifier
+            && strtolower($node->var->name->toString()) === 'cost'
+            && $this->isGeographicallyRelevant($node)
+        ) {
+            $this->rateCostNodes[] = $node;
+        }
+        if ($node instanceof MethodCall
+            && $node->name instanceof Identifier
+            && in_array(strtolower($node->name->toString()), ['set_cost','setcost'], true)
+            && $this->isGeographicallyRelevant($node)
+        ) {
+            $this->rateCostNodes[] = $node;
+        }
+
+        // 6) add_action('woocommerce_checkout_process', ...)
+        // Be permissive here: these hooks are directly tied to checkout validation; include without extra keyword heuristics.
         if ($node instanceof FuncCall
             && $node->name instanceof Name
             && $node->name->toString() === 'add_action'
             && isset($node->args[0])
             && $node->args[0]->value instanceof String_
             && in_array($node->args[0]->value->value, ['woocommerce_checkout_process', 'woocommerce_after_checkout_validation'])
-            && ($this->isGeographicallyRelevant($node) || $this->isPaymentRelevant($node))
         ) {
             $this->checkoutProcessHookNodes[] = $node;
         }
@@ -174,6 +197,8 @@ class RateAddCallVisitor extends NodeVisitorAbstract {
     public function getNewRateNodes(): array    { return $this->newRateNodes; }
     public function getCheckoutProcessHookNodes(): array { return $this->checkoutProcessHookNodes; }
     public function getPaymentGatewayHookNodes(): array { return $this->paymentGatewayHookNodes; }
+    public function getRateCostNodes(): array { return $this->rateCostNodes; }
+
     public function getPaymentMethodFilterNodes(): array { return $this->paymentMethodFilterNodes; }
 
     // Debug getters

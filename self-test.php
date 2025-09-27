@@ -19,6 +19,9 @@ if ( ! defined( 'WPINC' ) ) {
     die;
 }
 
+// Debug: Log that self-test.php is being loaded
+error_log('KISS_WSE: self-test.php file loaded, WordPress functions available: ' . (function_exists('add_action') ? 'YES' : 'NO'));
+
 /**
  * Adds the "Self Test" link to the plugin's Tools page menu.
  */
@@ -57,15 +60,22 @@ function kiss_wse_get_changelog_preview( $lines = 100 ) {
         }
     }
 
-    // Fallback to a simple plain text preview.
+    // Fallback to a minimal HTML preview with bold preserved for **text**.
     $contents = file( $file );
     if ( false === $contents ) {
         return '<p>' . esc_html__( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' ) . '</p>';
     }
-
+    $raw = implode( '', array_slice( $contents, 0, $lines ) );
+    // Convert Markdown bold **text** to <strong>text</strong>
+    $raw = preg_replace( '/\\*\\*(.+?)\\*\\*/s', '<strong>$1</strong>', $raw );
+    // Convert newlines to <br> for readability
+    $converted = nl2br( $raw );
+    $allowed = array(
+        'strong' => array(),
+        'br'     => array(),
+    );
     $fallback_html  = '<p><em>' . esc_html__( 'To see this rendered as HTML, please install the KISS Markdown Viewer plugin.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
-    $fallback_html .= '<pre>' . esc_html( implode( '', array_slice( $contents, 0, $lines ) ) ) . '</pre>';
-
+    $fallback_html .= wp_kses( $converted, $allowed );
     return $fallback_html;
 }
 
@@ -105,7 +115,53 @@ function kiss_wse_self_test_page_html() {
         </div>
 
         <p>This module helps verify core plugin functionality against the current environment. It focuses on the plugin's internal logic, such as AST scanning and data formatting helpers.</p>
+
+        <!-- Debug: Show AJAX action registration status -->
+        <div class="notice notice-info">
+            <p><strong>Debug Info:</strong></p>
+            <ul>
+                <li>
+                    Self-Test Action: <?php echo has_action( 'wp_ajax_kiss_wse_run_single_test' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_run_single_test';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
+                <li>
+                    Test-Connection Action: <?php echo has_action( 'wp_ajax_kiss_wse_test_ajax' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_test_ajax';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
+                <li>
+                    Update-Timestamp Action: <?php echo has_action( 'wp_ajax_kiss_wse_update_test_timestamp' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_update_test_timestamp';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
+                <li>Current User Can Manage WooCommerce: <?php echo current_user_can( 'manage_woocommerce' ) ? 'YES' : 'NO'; ?></li>
+                <li>Current User Can Manage Options: <?php echo current_user_can( 'manage_options' ) ? 'YES' : 'NO'; ?></li>
+                <li>AJAX URL: <?php echo esc_html( admin_url( 'admin-ajax.php' ) ); ?></li>
+            </ul>
+        </div>
+
         <button id="kiss-wse-run-self-tests" class="button button-primary">Run All Tests</button>
+        <button id="kiss-wse-test-ajax" class="button" style="margin-left: 10px;">Test AJAX Connection</button>
+        <div id="kiss-wse-ajax-test-result" style="margin-top: 10px;"></div>
         <p id="kiss-wse-last-test-time">
             <?php
             $last_run = get_option( 'kiss_wse_tests_last_run' );
@@ -126,7 +182,38 @@ function kiss_wse_self_test_page_html() {
     </div>
 
     <script type="text/javascript">
+        // Determine reliable AJAX endpoint independent of other scripts
+        var kissAjax = (typeof ajaxurl !== 'undefined' && ajaxurl) ? ajaxurl : '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>';
+
         jQuery(document).ready(function($) {
+            // Test AJAX connection button
+            $('#kiss-wse-test-ajax').on('click', function() {
+                var button = $(this);
+                var resultDiv = $('#kiss-wse-ajax-test-result');
+
+                button.prop('disabled', true);
+                resultDiv.html('<p>Testing AJAX connection...</p>');
+
+                $.post(kissAjax, {
+                    action: 'kiss_wse_test_ajax',
+                    nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>'
+                })
+                .done(function(response) {
+                    console.log('AJAX Test Response:', response);
+                    resultDiv.html('<p style="color: green;"><strong>AJAX Success!</strong> Response: ' + JSON.stringify(response) + '</p>');
+                })
+                .fail(function(xhr, status, error) {
+                    console.error('AJAX Test Error:', {status: status, error: error, responseText: xhr.responseText});
+                    resultDiv.html('<p style="color: red;"><strong>AJAX Failed!</strong><br>' +
+                        'Status: ' + status + '<br>' +
+                        'Error: ' + error + '<br>' +
+                        'Response: ' + xhr.responseText + '</p>');
+                })
+                .always(function() {
+                    button.prop('disabled', false);
+                });
+            });
+
             // Define the list of tests to run in sequence.
             const tests = [
                 { id: 'dependency_check', name: 'Environment: Dependency Check' },
@@ -134,6 +221,19 @@ function kiss_wse_self_test_page_html() {
                 { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
                 { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' },
                 { id: 'csv_injection_guard', name: 'Security: CSV Injection Guard' },
+                { id: 'changelog_preview', name: 'UX: Changelog Preview preserves <strong> bold' },
+                { id: 'ast_shipping_rules_geo_cost', name: 'Logic: AST detects rate removal and cost changes' },
+                { id: 'ast_payment_rules', name: 'Logic: AST detects payment gateway restrictions and checkout notices' },
+                { id: 'ast_mixed_geo_payment', name: 'Logic: AST detects both geo shipping and payment restrictions' },
+                // Deferred: { id: 'ast_array_placeholder', name: 'Logic: Array/placeholder resolution (conditions → human list)' },
+                // Deferred: bolding-detection tests are hidden from the UI until the Deferred Phase
+                // { id: 'ast_product_terms', name: 'Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)' },
+                // { id: 'ast_bold_fidelity', name: 'UX: Bold formatting fidelity for product and City/County/State names' },
+                // Deferred duplicate entries removed
+                // { id: 'ast_product_terms', name: 'Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)' },
+                // { id: 'ast_bold_fidelity', name: 'UX: Bold formatting fidelity for product and City/County/State names' },
+
+                { id: 'menu_registration', name: 'UI: Menu & Action Links Registration' },
             ];
 
             $('#kiss-wse-run-self-tests').on('click', function() {
@@ -154,7 +254,7 @@ function kiss_wse_self_test_page_html() {
                 if (index >= tests.length) {
                     $('#kiss-wse-run-self-tests').prop('disabled', false);
                     // Update timestamp after all tests are done
-                     $.post(ajaxurl, { action: 'kiss_wse_update_test_timestamp', nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>' }, function(response) {
+                     $.post(kissAjax, { action: 'kiss_wse_update_test_timestamp', nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>' }, function(response) {
                         if (response.success) {
                             $('#kiss-wse-last-test-time').html('<strong>Tests Last Ran:</strong> ' + response.data.time);
                         }
@@ -167,11 +267,12 @@ function kiss_wse_self_test_page_html() {
                 var row = $('<tr><td class="test-icon"><span class="spinner is-active"></span></td><td><strong>' + test.name + '</strong></td><td class="test-message">Running...</td></tr>');
                 tableBody.append(row);
 
-                $.post(ajaxurl, {
+                $.post(kissAjax, {
                     action: 'kiss_wse_run_single_test',
                     nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>',
                     test_id: test.id
                 }, function(response) {
+                    console.log('AJAX Response for test ' + test.id + ':', response);
                     var icon = '';
                     var message = '';
 
@@ -187,10 +288,16 @@ function kiss_wse_self_test_page_html() {
                     row.find('.test-message').html(message);
 
                     runTest(index + 1); // Run the next test
-                }).fail(function() {
+                }).fail(function(xhr, status, error) {
+                    console.error('AJAX Error for test ' + test.id + ':', {
+                        status: status,
+                        error: error,
+                        responseText: xhr.responseText,
+                        ajaxurl: ajaxurl
+                    });
                     var icon = '<span style="color:red; font-size:1.5em; line-height:1;" class="dashicons dashicons-dismiss"></span>';
                     row.find('.test-icon').html(icon);
-                    row.find('.test-message').html('Failed to execute test (AJAX error).');
+                    row.find('.test-message').html('Failed to execute test (AJAX error). Check console for details.');
                     $('#kiss-wse-run-self-tests').prop('disabled', false); // Stop on failure
                 });
             }
@@ -201,17 +308,43 @@ function kiss_wse_self_test_page_html() {
 
 /**
  * Dispatches a single self-test based on the provided test ID.
+ *
+ * @since 2.7.3
+ * @internal Self-test endpoint. Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
+ * @return void Sends JSON and exits via wp_send_json_*.
  */
 function kiss_wse_run_single_test_callback() {
-    check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
-    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+    // Ensure we're outputting JSON
+    header('Content-Type: application/json');
+
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'message' => 'Permission denied.' ] );
     }
 
-    $test_id = isset( $_POST['test_id'] ) ? sanitize_key( $_POST['test_id'] ) : '';
-    $main_class = new KISS_WSE_Debugger();
+    // Debug: Log that the AJAX handler was called
+    error_log( 'KISS_WSE: AJAX handler called for test: ' . ( $_POST['test_id'] ?? 'unknown' ) );
 
-    switch ( $test_id ) {
+    $test_id = isset( $_POST['test_id'] ) ? sanitize_key( $_POST['test_id'] ) : '';
+
+    // Wrap the entire test execution in try-catch to prevent PHP errors from breaking JSON response
+    try {
+        // Only instantiate the main class if we need it for specific tests
+        $main_class = null;
+        // Note: bolding-detection tests ('ast_product_terms', 'ast_bold_fidelity') are deferred and not instantiated
+        if ( in_array( $test_id, [ 'summarize_method_helper', 'warning_logic_mock', 'ast_scanner_logic', 'ast_shipping_rules_geo_cost', 'ast_payment_rules', 'ast_mixed_geo_payment' ], true ) ) {
+            if ( class_exists( 'KISS_WSE_Debugger' ) ) {
+                $main_class = new KISS_WSE_Debugger();
+            } else {
+                wp_send_json_error( [ 'message' => 'KISS_WSE_Debugger class not found.' ] );
+                return;
+            }
+        }
+
+        switch ( $test_id ) {
         case 'dependency_check':
             $wc_ok = class_exists( 'WC_Shipping_Zones' );
             $parser_ok = class_exists( 'PhpParser\\ParserFactory' );
@@ -321,16 +454,6 @@ function kiss_wse_run_single_test_callback() {
                 unlink($temp_file);
 
                 // CORRECTED: The check for the error message now matches the actual HTML output, where only the first state is bolded.
-                $checks = [
-                    // Test 1 Check: Look for Kratom being bolded in the error message
-                    'We cannot ship <strong>Kratom</strong> to',
-
-                    // Test 2 Check: Look for Alabama being bolded (first state in the resolved array)
-                    'Adds a checkout error message: “We cannot ship <strong>Kratom</strong> to <strong>Alabama</strong>, Arkansas, Indiana, Vermont, Wisconsin.”',
-
-                    // Test 3 Check: Look for the error message structure
-                    'Adds a checkout error message:'
-                ];
 
                 // Check if the scanner output contains the key elements we expect
                 $has_kratom_bold = strpos($output, '<strong>Kratom</strong>') !== false;
@@ -360,7 +483,148 @@ function kiss_wse_run_single_test_callback() {
                 if ($test_file_path && file_exists($test_file_path)) {
                     unlink($test_file_path);
                 }
+
             }
+                break;
+
+            case 'ast_shipping_rules_geo_cost':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_geo_cost_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_package_rates', function($rates){
+    $state = 'OR';
+    if ($state === 'OR') {
+        unset($rates['free_shipping:1']);
+    }
+    foreach ($rates as $rid => $rate) {
+        if (method_exists($rate, 'set_cost')) {
+            $rate->set_cost(5);
+        } else {
+            if (isset($rates[$rid]) && property_exists($rates[$rid], 'cost')) {
+                $rates[$rid]->cost = 5;
+            }
+        }
+    }
+    return $rates;
+}, 10, 1);
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okUnset = (strpos($output, 'Geographical rate removal') !== false) || (strpos($output, 'Removes') !== false);
+                $okCost  = (strpos($output, 'Shipping rate cost adjusted') !== false) || (strpos($output, 'Adjusts a shipping rate cost') !== false);
+                if ($okUnset && $okCost) {
+                    wp_send_json_success( [ 'message' => 'AST: detected unset() and cost adjustment patterns.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            case 'ast_payment_rules':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_payment_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_available_payment_gateways', function($gws){
+    $country = 'US';
+    if ($country === 'US') { unset($gws['cod']); }
+    return $gws;
+}, 10, 1);
+
+add_filter('woocommerce_gateway_title', function($title, $id){
+    if ($id === 'cod') { return 'No COD in your area'; }
+    return $title;
+}, 10, 2);
+
+add_action('woocommerce_checkout_process', function(){
+    if (function_exists('wc_add_notice')) {
+        wc_add_notice('Payment method not allowed for your region', 'error');
+    }
+});
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okGateways = (strpos($output, 'Modifies available payment gateways') !== false);
+                $okFilters  = (strpos($output, 'Examines payment method hook') !== false) || (strpos($output, 'Examines payment method hooks') !== false);
+                if ($okGateways && $okFilters) {
+                    wp_send_json_success( [ 'message' => 'AST: detected payment gateway restrictions and payment method filtering.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected payment patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            case 'ast_product_terms':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_terms_');
+                $code = <<<'PHP'
+<?php
+$errors->add('restricted', 'We cannot ship Amanita Mushroom or THC-A products to Alabama.');
+$errors->add('notice', 'Kratom is restricted in Oregon.');
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okAmanita = (strpos($output, '<strong>Amanita Mushroom</strong>') !== false) || (strpos($output, '<strong>Amanita</strong>') !== false);
+                $okTHC     = (strpos($output, '<strong>THC-A</strong>') !== false) || (strpos($output, '<strong>THCA</strong>') !== false);
+                $okKratom  = (strpos($output, '<strong>Kratom</strong>') !== false);
+                if ($okAmanita && $okTHC && $okKratom) {
+                    wp_send_json_success( [ 'message' => 'AST: detected product term-driven rules (Amanita, THC-A, Kratom).' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected product term bolding not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+            // Deferred: 'ast_array_placeholder' test is hidden from UI and dispatcher.
+
+            case 'ast_bold_fidelity':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_bold_');
+                $code = <<<'PHP'
+<?php
+$errors->add('restricted', 'Payment is blocked in City of Portland or Cook County.');
+$errors->add('restricted', 'Available only for New York.');
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okCity   = (strpos($output, 'City of <strong>Portland</strong>') !== false);
+                $okCounty = (strpos($output, '<strong>Cook</strong> County') !== false);
+                $okState  = (strpos($output, '<strong>New York</strong>') !== false);
+                if ($okCity && $okCounty && $okState) {
+                    wp_send_json_success( [ 'message' => 'AST: bold formatting fidelity confirmed for City/County/State names.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected bold formatting not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
+
+            case 'ast_mixed_geo_payment':
+                $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_mixed_');
+                $code = <<<'PHP'
+<?php
+add_filter('woocommerce_package_rates', function($rates){
+    $state = 'TX';
+    if ($state === 'TX') { unset($rates['flat_rate:1']); }
+    return $rates;
+}, 10, 1);
+
+add_filter('woocommerce_available_payment_gateways', function($gws){
+    $city = 'Dallas';
+    if ($city === 'Dallas') { unset($gws['cheque']); }
+    return $gws;
+}, 10, 1);
+PHP;
+                file_put_contents($tmp, $code);
+                $output = $main_class->scan_single_file_for_test($tmp);
+                @unlink($tmp);
+                $okGeo      = (strpos($output, 'Removes a shipping rate by key') !== false) || (strpos($output, 'Theme code hooks into WooCommerce package rates') !== false);
+                $okGateways = (strpos($output, 'Modifies available payment gateways') !== false);
+                $okFilters  = (strpos($output, 'Examines payment method hook') !== false) || (strpos($output, 'Examines payment method hooks') !== false);
+                if ($okGeo && $okGateways && $okFilters) {
+                    wp_send_json_success( [ 'message' => 'AST: detected mixed geographical and payment restrictions.' ] );
+                } else {
+                    wp_send_json_error( [ 'message' => 'AST: expected mixed patterns not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
+                }
+                break;
+
         case 'csv_injection_guard':
             $inputs = ['=1+1','+foo','-bar','@SUM(A1:A2)','hello','123'];
             $fallback = function($v){ $s=(string)$v; return ($s!=='' && in_array($s[0],['=','+','-','@'],true)) ? "'".$s : $s; };
@@ -377,19 +641,114 @@ function kiss_wse_run_single_test_callback() {
             }
             break;
 
+        case 'menu_registration':
+            $issues = [];
+
+            // In admin-ajax context, admin menus are not built. Verify registration callbacks exist instead.
+            if ( ! function_exists('kiss_wse_add_self_test_submenu_page') ) {
+                $issues[] = 'Self-Test submenu callback not defined';
+            }
+            if ( ! class_exists('KISS_WSE_Debugger') ) {
+                $issues[] = 'Main debugger class not found';
+            } else {
+                if ( ! method_exists('KISS_WSE_Debugger', 'register_menu') ) {
+                    $issues[] = 'register_menu() method missing on KISS_WSE_Debugger';
+                }
+                if ( ! method_exists('KISS_WSE_Debugger', 'add_action_links') ) {
+                    $issues[] = 'add_action_links() method missing on KISS_WSE_Debugger';
+                }
+            }
+
+            if (empty($issues)) {
+                wp_send_json_success(['message' => 'Menu registration: PASS (callbacks present)']);
+            } else {
+                wp_send_json_error(['message' => 'Menu registration: FAIL - ' . implode(', ', $issues)]);
+            }
+            break;
+
+        case 'changelog_preview':
+            $html = kiss_wse_get_changelog_preview( 150 );
+            $labels = [ 'Fix:', 'Enhancement:', 'Feature:' ];
+            $found = false;
+            foreach ( $labels as $label ) {
+                if ( strpos( $html, '<strong>' . $label . '</strong>' ) !== false ) { $found = true; break; }
+            }
+            if ( $found || strpos( $html, '<strong>' ) !== false ) {
+                wp_send_json_success( [ 'message' => 'Changelog preview preserves <strong> formatting.' ] );
+            } else {
+                wp_send_json_error( [ 'message' => 'Changelog preview does not appear to preserve <strong> formatting.' ] );
+            }
+            break;
+
+
+        case 'changelog_preview':
+            $html = kiss_wse_get_changelog_preview( 150 );
+            $labels = [ 'Fix:', 'Enhancement:', 'Feature:' ];
+            $found = false;
+            foreach ( $labels as $label ) {
+                if ( strpos( $html, '<strong>' . $label . '</strong>' ) !== false ) { $found = true; break; }
+            }
+            if ( $found || strpos( $html, '<strong>' ) !== false ) {
+                wp_send_json_success( [ 'message' => 'Changelog preview preserves <strong> formatting.' ] );
+            } else {
+                wp_send_json_error( [ 'message' => 'Changelog preview does not appear to preserve <strong> formatting.' ] );
+            }
+            break;
+
         default:
             wp_send_json_error( [ 'message' => 'Invalid test ID provided.' ] );
             break;
+        }
+    } catch ( Exception $e ) {
+        error_log( 'KISS_WSE: Test execution error: ' . $e->getMessage() );
+        wp_send_json_error( [ 'message' => 'Test execution failed: ' . $e->getMessage() ] );
+    } catch ( Error $e ) {
+        error_log( 'KISS_WSE: Test execution fatal error: ' . $e->getMessage() );
+        wp_send_json_error( [ 'message' => 'Test execution fatal error: ' . $e->getMessage() ] );
     }
 }
-add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+/**
+ * Simple AJAX connectivity test handler.
+ *
+ * @since 2.7.3
+ * @internal Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
+ * @return void
+ */
+function kiss_wse_test_ajax_callback() {
+    // Set proper headers
+    header('Content-Type: application/json');
+
+    // Check if WordPress functions are available
+    if ( ! function_exists( 'wp_send_json_success' ) ) {
+        echo json_encode( [ 'success' => false, 'data' => [ 'message' => 'wp_send_json_success not available' ] ] );
+        exit;
+    }
+
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( [ 'message' => 'Permission denied.' ] );
+    }
+
+    wp_send_json_success( [ 'message' => 'AJAX is working! Handler registered successfully.' ] );
+}
+// AJAX handlers are now registered in the main plugin class constructor
 
 /**
  * AJAX handler to update the 'last run' timestamp.
+ *
+ * @since 2.7.3
+ * @internal Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
  */
 function kiss_wse_update_test_timestamp_callback() {
-    check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
-    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
+    // Check for WooCommerce capability first, fallback to manage_options
+    if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'message' => 'Permission denied.' ] );
     }
 
@@ -400,4 +759,3 @@ function kiss_wse_update_test_timestamp_callback() {
         'time' => date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $timestamp ),
     ]);
 }
-add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );

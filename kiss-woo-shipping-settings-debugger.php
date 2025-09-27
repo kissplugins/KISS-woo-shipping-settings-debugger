@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.6.0
+ * Version:     2.7.16
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -14,7 +14,13 @@ define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
 
 require_once __DIR__ . '/preview-trait.php';
 require_once __DIR__ . '/scanner-trait.php';
+
+// Debug: Log that we're about to load self-test.php
+error_log('KISS_WSE: About to load self-test.php');
 require_once __DIR__ . '/self-test.php';
+error_log('KISS_WSE: self-test.php loaded successfully');
+
+// Self-test handlers are registered internally; standalone ajax-handlers.php is intentionally not included to avoid duplicate registrations.
 
 
 // Shared helper: sanitize a CSV cell to prevent formula injection
@@ -136,6 +142,7 @@ trait KISS_WSE_Testable {
 
         $sections = [
             'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+            'rateCost'    => $rate_visitor->getRateCostNodes(),
             'newRates'    => $rate_visitor->getNewRateNodes(),
             'errors'      => $rate_visitor->getErrorAddNodes(),
             'paymentGateways' => $rate_visitor->getPaymentGatewayHookNodes(),
@@ -187,6 +194,20 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
      * Check if required plugin is installed/active
      */
     public function check_required_plugin() {
+        // During AJAX requests, avoid emitting admin notices which would corrupt JSON.
+        if ( defined('DOING_AJAX') && constant('DOING_AJAX') ) {
+            if ( ! has_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
+            }
+            if ( ! has_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+            }
+            if ( ! has_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
+            }
+            return;
+        }
+
         if ( ! current_user_can('install_plugins') ) {
             return;
         }
@@ -328,17 +349,36 @@ class KISS_WSE_Debugger {
     private ?\PhpParser\Parser $parser;
 
     public function __construct(?\PhpParser\Parser $parser = null) {
+        error_log('KISS_WSE: Constructor called');
+
         // Load PHP-Parser
         if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+            error_log('KISS_WSE: PHP-Parser not found, trying to load');
             $this->maybe_require_parser_loader();
         } else {
+            error_log('KISS_WSE: PHP-Parser found, creating parser');
             $this->parser = $parser ?? $this->create_parser();
         }
 
-        add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
+        $plugin_basename = plugin_basename( KISS_WSE_PLUGIN_FILE );
+        add_filter( 'plugin_action_links_' . $plugin_basename, [ $this, 'add_action_links' ] );
         add_action( 'admin_menu', [ $this, 'register_menu' ] );
         add_action( 'admin_menu', 'kiss_wse_add_self_test_submenu_page' );
         add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
+
+        // Register AJAX handlers for self-test functionality using init hook
+        add_action( 'init', [ $this, 'register_ajax_handlers' ] );
+    }
+
+    /**
+     * Register AJAX handlers for self-test functionality
+     */
+    public function register_ajax_handlers() {
+        error_log('KISS_WSE: register_ajax_handlers called');
+        add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
+        add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+        add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
+        error_log('KISS_WSE: AJAX handlers registered in register_ajax_handlers method');
     }
 
     /**
@@ -358,12 +398,19 @@ class KISS_WSE_Debugger {
     }
 
     /**
-     * Add a convenient settings link on the plugins page.
+     * Add convenient action links on the plugins page.
      */
     public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
-        $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
-        array_unshift( $links, "<a href=\"$url\">$text</a>" );
+        // Main settings/debugger link
+        $settings_url = esc_url( admin_url( 'admin.php?page=' . $this->page_slug ) );
+        $settings_text = esc_html__( 'Settings', 'kiss-woo-shipping-debugger' );
+        array_unshift( $links, "<a href=\"$settings_url\">$settings_text</a>" );
+
+        // Self-test link for quick access
+        $test_url = esc_url( admin_url( 'admin.php?page=kiss-wse-self-test' ) );
+        $test_text = esc_html__( 'Self-Test', 'kiss-woo-shipping-debugger' );
+        array_unshift( $links, "<a href=\"$test_url\">$test_text</a>" );
+
         return $links;
     }
 
@@ -371,15 +418,28 @@ class KISS_WSE_Debugger {
      * Register the Tools submenu page for the debugger UI.
      */
     public function register_menu(): void {
-        // CHANGED: Moved page from "Tools" to the "WooCommerce" menu.
-        add_submenu_page(
-            'woocommerce',
-            __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
-            'manage_woocommerce',
-            $this->page_slug,
-            [ $this, 'render_page' ]
-        );
+        // Check if WooCommerce is active before adding to WooCommerce menu
+        if ( class_exists( 'WooCommerce' ) ) {
+            // Add to WooCommerce menu
+            add_submenu_page(
+                'woocommerce',
+                __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                'manage_woocommerce',
+                $this->page_slug,
+                [ $this, 'render_page' ]
+            );
+        } else {
+            // Fallback to Tools menu if WooCommerce is not active
+            add_submenu_page(
+                'tools.php',
+                __( 'KISS Woo Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                __( 'Shipping & Payment Debugger', 'kiss-woo-shipping-debugger' ),
+                'manage_options',
+                $this->page_slug,
+                [ $this, 'render_page' ]
+            );
+        }
     }
 
     /**
@@ -609,7 +669,24 @@ class KISS_WSE_Debugger {
 
         fclose( $out );
     }
-
-
-
 }
+
+// Initialize the plugin
+if ( class_exists( 'KISS_WSE_Debugger' ) ) {
+    // Hook into WordPress initialization to ensure proper loading
+    add_action( 'plugins_loaded', function() {
+        error_log('KISS_WSE: Initializing plugin class');
+        try {
+            new KISS_WSE_Debugger();
+            error_log('KISS_WSE: Plugin class initialized successfully');
+        } catch (Exception $e) {
+            error_log('KISS_WSE: Plugin initialization error: ' . $e->getMessage());
+        } catch (Error $e) {
+            error_log('KISS_WSE: Plugin initialization fatal error: ' . $e->getMessage());
+        }
+    } );
+} else {
+    // Log error if class doesn't exist
+    error_log( 'KISS_WSE_Debugger class not found during plugin initialization' );
+}
+

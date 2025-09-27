@@ -3,6 +3,18 @@
  * Trait providing AST scanning utilities used by the debugger.
  */
 trait KISS_WSE_Scanner {
+
+    /**
+     * Safely allow strong tags in HTML output
+     */
+    private function allow_strong_tags( $content ) {
+        if ( function_exists( 'wp_kses' ) ) {
+            return wp_kses( $content, array( 'strong' => array() ) );
+        }
+        // Fallback: only allow <strong> and </strong> tags
+        return preg_replace( '/(<(?!\/?(strong)(?:\s|>))[^>]*>)/', '', $content );
+    }
+
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
@@ -120,7 +132,10 @@ trait KISS_WSE_Scanner {
                                     echo 'Duplicate check: ' . ( in_array( $normalized_candidate, $normalized_files, true ) ? 'DUPLICATE FOUND' : 'UNIQUE FILE' ) . '<br>';
                                     echo '</details>'; // Close debug section
 
-                                    if ( ! in_array( $normalized_candidate, $normalized_files, true ) ) {
+                                    $inc_norm = rtrim( wp_normalize_path( $base_real ), '/\\' ) . '/inc/';
+                                    if ( strpos( $normalized_candidate, $inc_norm ) !== 0 ) {
+                                        echo '<div class="notice notice-warning" style="margin: 10px 0;"><p>' . esc_html__( 'Additional file must be inside the active theme inc/ directory.', 'kiss-woo-shipping-debugger' ) . '</p></div>';
+                                    } elseif ( ! in_array( $normalized_candidate, $normalized_files, true ) ) {
                                         $files_to_scan[] = $normalized_candidate;
                                         echo '<div class="notice notice-success" style="margin: 10px 0;"><p>';
                                         echo '<strong>✅ ' . esc_html__( 'Additional file added for scanning:', 'kiss-woo-shipping-debugger' ) . '</strong><br>';
@@ -245,6 +260,7 @@ trait KISS_WSE_Scanner {
             $sections = [
                 'errors'      => $rate_visitor->getErrorAddNodes(),
                 'unsetRates'  => $rate_visitor->getUnsetRateNodes(),
+                'rateCost'    => $rate_visitor->getRateCostNodes(),
                 'filterHooks' => $rate_visitor->getFilterHookNodes(),
                 'rateCalls'   => $rate_visitor->getAddRateNodes(),
                 'newRates'    => $rate_visitor->getNewRateNodes(),
@@ -429,8 +445,8 @@ trait KISS_WSE_Scanner {
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
-                    esc_html( $desc ),
-                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    $this->allow_strong_tags( $desc ),
+                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
             echo '</ul>';
@@ -449,8 +465,8 @@ trait KISS_WSE_Scanner {
                 printf(
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
-                    esc_html( $desc ),
-                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    $this->allow_strong_tags( $desc ),
+                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
             echo '</ul>';
@@ -485,6 +501,8 @@ trait KISS_WSE_Scanner {
     private function short_explanation_label( string $key ): string {
         switch ( $key ) {
             case 'filterHooks': return __( 'Geographical shipping rate filtering', 'kiss-woo-shipping-debugger' );
+            case 'rateCost':    return __( 'Shipping rate cost adjusted', 'kiss-woo-shipping-debugger' );
+
             case 'rateCalls':   return __( 'Location-based custom rate', 'kiss-woo-shipping-debugger' );
             case 'newRates':    return __( 'Location-based rate object', 'kiss-woo-shipping-debugger' );
             case 'unsetRates':  return __( 'Geographical rate removal', 'kiss-woo-shipping-debugger' );
@@ -498,6 +516,16 @@ trait KISS_WSE_Scanner {
 
     /**
      * Helper function to apply bolding rules to error messages.
+     *
+     * IMPORTANT: Do not refactor away the explicit <strong>-preservation behavior.
+     * - Product names (e.g., Kratom, Amanita, THC-A/THCA) and State/City/County names
+     *   must remain bolded in the final rendered output for readability.
+     * - Sanitization elsewhere should continue to allow only <strong> tags for safety.
+     * - Tests that assert on bolding fidelity are currently DEFERRED; however, this
+     *   formatting is part of the user-facing contract and should be preserved.
+     *
+     * If you need to modify this logic, update the Deferred Phase tests in
+     * PROJECT-SELFTESTS.md accordingly.
      */
     private function format_error_message( string $message ): string {
         // ReDoS hardening: truncate and adjust PCRE limits just for formatting
@@ -510,10 +538,10 @@ trait KISS_WSE_Scanner {
         @ini_set( 'pcre.backtrack_limit', '100000' );
         @ini_set( 'pcre.recursion_limit', '100000' );
 
-        // 1. Bold specific, high-priority keywords
+        // 1. Bold specific, high-priority keywords (products)
         $message = str_ireplace(
-            ['Kratom'], // Oregon is handled by the state rule below
-            ['<strong>Kratom</strong>'],
+            ['Kratom', 'Amanita Mushroom', 'Amanita', 'THC-A', 'THCA'],
+            ['<strong>Kratom</strong>', '<strong>Amanita Mushroom</strong>', '<strong>Amanita</strong>', '<strong>THC-A</strong>', '<strong>THCA</strong>'],
             $message
         );
 
@@ -524,9 +552,29 @@ trait KISS_WSE_Scanner {
             $message
         );
 
-        // ADDED: Handle product names that appear before "or"
+        // Also bold single/two-word product tokens before "or" (only capitalized tokens to avoid bolding phrases like "of Portland")
         $message = preg_replace(
-            '/(\b[\w-]+(?:\s[\w-]+)?)\s+(or)\b/i',
+            '/\b([A-Z][\w-]*(?:\s[A-Z][\w-]*)?)\s+(or)\b/u',
+            '<strong>$1</strong> $2',
+            $message
+        );
+
+        // 2b. Bold common city/county name patterns
+        // City of <Name>
+        $message = preg_replace(
+            '/\b(City of)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\b/u',
+            '$1 <strong>$2</strong>',
+            $message
+        );
+        // County of <Name>
+        $message = preg_replace(
+            '/\b(County of)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\b/u',
+            '$1 <strong>$2</strong>',
+            $message
+        );
+        // <Name> County
+        $message = preg_replace(
+            '/\b([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)\s+(County)\b/u',
             '<strong>$1</strong> $2',
             $message
         );
@@ -545,6 +593,12 @@ trait KISS_WSE_Scanner {
             $message
         );
 
+        // 4. De-duplicate nested <strong> tags that can arise from multiple rules
+        $message = str_replace(['<strong><strong>','</strong></strong>'], ['<strong>','</strong>'], $message);
+
+                            // NOTE: preserve <strong>-allowed formatting for product/state/city/county names.
+                            // Bolding-fidelity tests are deferred, but this behavior is part of the UX contract.
+
         return $message;
     }
 
@@ -555,6 +609,9 @@ trait KISS_WSE_Scanner {
                     if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
                         $msg = $this->extract_string( $node->args[1]->value, $collected_arrays, $current_file );
                         if ( $msg !== '' ) {
+                            // Preserve bolding for Product and State/City/County names via format_error_message();
+                            // tests asserting bolding are deferred but this behavior is contractual UX.
+
                             $formatted_msg = $raw ? $msg : $this->format_error_message( $msg );
                             return sprintf(
                                 __( 'Adds a checkout error message: “%s”. Customers will be blocked until they resolve it.', 'kiss-woo-shipping-debugger' ),
@@ -652,6 +709,7 @@ trait KISS_WSE_Scanner {
                         $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
                     }
                     if ( $when !== '' ) {
+
                         $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
                     }
                     return $summary;
@@ -676,6 +734,41 @@ trait KISS_WSE_Scanner {
                     $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
                         ? $this->describe_callback( $node->args[1]->value )
                         : '';
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
+
+                    $summary = __( 'Examines payment method hooks or actions.', 'kiss-woo-shipping-debugger' );
+                    if ( $hook_name !== '' ) {
+                        $summary = sprintf( __( 'Examines payment method hook "%s".', 'kiss-woo-shipping-debugger' ), $hook_name );
+                    }
+                    if ( $cb ) {
+                        $summary .= ' ' . sprintf( __( 'Callback: %s.', 'kiss-woo-shipping-debugger' ), $cb );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
+
+                case 'rateCost':
+                    $amount = '';
+                    if ($node instanceof \PhpParser\Node\Expr\Assign) {
+                        $amount = $this->simple_expr_text($node->expr, $collected_arrays, $current_file);
+                    } elseif ($node instanceof \PhpParser\Node\Expr\MethodCall && isset($node->args[0])) {
+                        if ($node->args[0]->value instanceof \PhpParser\Node\Expr\Variable) {
+                            $amount = $this->describe_variable_assignment($node->args[0]->value);
+                        } else {
+                            $amount = $this->simple_expr_text($node->args[0]->value, $collected_arrays, $current_file);
+                        }
+                    }
+                    $when = $this->condition_chain_text( $node, $collected_arrays, $current_file );
+                    $summary = __( 'Adjusts a shipping rate cost.', 'kiss-woo-shipping-debugger' );
+                    if ( $amount !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'New cost: %s.', 'kiss-woo-shipping-debugger' ), esc_html( $amount ) );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
+
                     $summary = __( 'Payment-related action hook.', 'kiss-woo-shipping-debugger' );
                     if ( $hook_name !== '' ) {
                         $summary = sprintf( __( 'Hooks into "%s" for payment processing.', 'kiss-woo-shipping-debugger' ), $hook_name );
@@ -1022,7 +1115,7 @@ trait KISS_WSE_Scanner {
                     $array_data = $file_arrays[$scope_key][$var_name];
                     if( is_array($array_data) && !empty($array_data) ) {
                         $list = $this->format_array_for_display( array_values($array_data) );
-                        return sprintf( __( 'the location is one of: %s', 'kiss-woo-shipping-debugger' ), '<strong>' . esc_html( $list ) . '</strong>' );
+                        return sprintf( __( 'the location is one of: %s', 'kiss-woo-shipping-debugger' ), $this->allow_strong_tags( '<strong>' . esc_html( $list ) . '</strong>' ) );
                     }
                 }
             }
