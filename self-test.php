@@ -143,10 +143,8 @@ function kiss_wse_self_test_page_html() {
     </div>
 
     <script type="text/javascript">
-        // Ensure ajaxurl is available
-        if (typeof ajaxurl === 'undefined') {
-            var ajaxurl = '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>';
-        }
+        // Determine reliable AJAX endpoint independent of other scripts
+        var kissAjax = (typeof ajaxurl !== 'undefined' && ajaxurl) ? ajaxurl : '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>';
 
         jQuery(document).ready(function($) {
             // Test AJAX connection button
@@ -157,8 +155,9 @@ function kiss_wse_self_test_page_html() {
                 button.prop('disabled', true);
                 resultDiv.html('<p>Testing AJAX connection...</p>');
 
-                $.post(ajaxurl, {
-                    action: 'kiss_wse_test_ajax'
+                $.post(kissAjax, {
+                    action: 'kiss_wse_test_ajax',
+                    nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>'
                 })
                 .done(function(response) {
                     console.log('AJAX Test Response:', response);
@@ -204,7 +203,7 @@ function kiss_wse_self_test_page_html() {
                 if (index >= tests.length) {
                     $('#kiss-wse-run-self-tests').prop('disabled', false);
                     // Update timestamp after all tests are done
-                     $.post(ajaxurl, { action: 'kiss_wse_update_test_timestamp', nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>' }, function(response) {
+                     $.post(kissAjax, { action: 'kiss_wse_update_test_timestamp', nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>' }, function(response) {
                         if (response.success) {
                             $('#kiss-wse-last-test-time').html('<strong>Tests Last Ran:</strong> ' + response.data.time);
                         }
@@ -217,7 +216,7 @@ function kiss_wse_self_test_page_html() {
                 var row = $('<tr><td class="test-icon"><span class="spinner is-active"></span></td><td><strong>' + test.name + '</strong></td><td class="test-message">Running...</td></tr>');
                 tableBody.append(row);
 
-                $.post(ajaxurl, {
+                $.post(kissAjax, {
                     action: 'kiss_wse_run_single_test',
                     nonce: '<?php echo esc_js( wp_create_nonce( 'kiss_wse_ajax_nonce' ) ); ?>',
                     test_id: test.id
@@ -258,29 +257,25 @@ function kiss_wse_self_test_page_html() {
 
 /**
  * Dispatches a single self-test based on the provided test ID.
+ *
+ * @since 2.7.3
+ * @internal Self-test endpoint. Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
+ * @return void Sends JSON and exits via wp_send_json_*.
  */
 function kiss_wse_run_single_test_callback() {
     // Ensure we're outputting JSON
     header('Content-Type: application/json');
 
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( [ 'message' => 'Permission denied.' ] );
+    }
+
     // Debug: Log that the AJAX handler was called
     error_log( 'KISS_WSE: AJAX handler called for test: ' . ( $_POST['test_id'] ?? 'unknown' ) );
-
-    // Skip nonce check for now to isolate the issue
-    // try {
-    //     check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
-    // } catch ( Exception $e ) {
-    //     error_log( 'KISS_WSE: Nonce check failed: ' . $e->getMessage() );
-    //     wp_send_json_error( [ 'message' => 'Security check failed.' ] );
-    //     return;
-    // }
-
-    // Temporarily disable permission check for debugging
-    // if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
-    //     error_log( 'KISS_WSE: Permission denied for user' );
-    //     wp_send_json_error( [ 'message' => 'Permission denied.' ] );
-    //     return;
-    // }
 
     $test_id = isset( $_POST['test_id'] ) ? sanitize_key( $_POST['test_id'] ) : '';
 
@@ -520,31 +515,46 @@ function kiss_wse_run_single_test_callback() {
         wp_send_json_error( [ 'message' => 'Test execution fatal error: ' . $e->getMessage() ] );
     }
 }
-// Simple test AJAX handler for debugging
+/**
+ * Simple AJAX connectivity test handler.
+ *
+ * @since 2.7.3
+ * @internal Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
+ * @return void
+ */
 function kiss_wse_test_ajax_callback() {
     // Set proper headers
     header('Content-Type: application/json');
 
-    // Log that we reached this function
-    error_log('KISS_WSE: Simple AJAX test handler called');
-
     // Check if WordPress functions are available
     if ( ! function_exists( 'wp_send_json_success' ) ) {
-        error_log('KISS_WSE: wp_send_json_success not available');
         echo json_encode( [ 'success' => false, 'data' => [ 'message' => 'wp_send_json_success not available' ] ] );
         exit;
     }
 
-    error_log('KISS_WSE: About to send JSON success response');
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( [ 'message' => 'Permission denied.' ] );
+    }
+
     wp_send_json_success( [ 'message' => 'AJAX is working! Handler registered successfully.' ] );
 }
 // AJAX handlers are now registered in the main plugin class constructor
 
 /**
  * AJAX handler to update the 'last run' timestamp.
+ *
+ * @since 2.7.3
+ * @internal Requires nonce 'kiss_wse_ajax_nonce' and capability manage_woocommerce or manage_options.
  */
 function kiss_wse_update_test_timestamp_callback() {
-    check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce' );
+    // Security: nonce + capability fallback (non-die)
+    if ( false === check_ajax_referer( 'kiss_wse_ajax_nonce', 'nonce', false ) ) {
+        wp_send_json_error( [ 'message' => 'Security check failed.' ] );
+    }
     // Check for WooCommerce capability first, fallback to manage_options
     if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'message' => 'Permission denied.' ] );

@@ -2,6 +2,13 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.4
+* Fix: Self-Test AJAX handlers now use non-die nonce verification to return structured JSON errors instead of transport failures.
+* Fix: Removed duplicate AJAX registrations and the external ajax-handlers include to eliminate registration conflicts.
+* Dev: Enforced nonce on the Test AJAX button request and added PHPDoc to timestamp handler.
+* DX: Self-Test page consistently posts the same suite nonce with every request for reliability.
+
+
 ## 2.7.3
 * Docs: Split self-test plan phases into 1.0/1.5 and 2.0/2.5 for finer-grained focus and troubleshooting.
 * Docs: Added PHPDoc guidelines requirement for all self-test functions and dispatcher handlers.

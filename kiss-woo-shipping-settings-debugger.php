@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.7.3
+ * Version:     2.7.4
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -20,8 +20,7 @@ error_log('KISS_WSE: About to load self-test.php');
 require_once __DIR__ . '/self-test.php';
 error_log('KISS_WSE: self-test.php loaded successfully');
 
-// Load standalone AJAX handlers
-require_once __DIR__ . '/ajax-handlers.php';
+// Self-test handlers are registered internally; standalone ajax-handlers.php is intentionally not included to avoid duplicate registrations.
 
 
 // Shared helper: sanitize a CSV cell to prevent formula injection
@@ -194,6 +193,20 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
      * Check if required plugin is installed/active
      */
     public function check_required_plugin() {
+        // During AJAX requests, avoid emitting admin notices which would corrupt JSON.
+        if ( defined('DOING_AJAX') && constant('DOING_AJAX') ) {
+            if ( ! has_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
+            }
+            if ( ! has_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
+            }
+            if ( ! has_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' ) ) {
+                add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
+            }
+            return;
+        }
+
         if ( ! current_user_can('install_plugins') ) {
             return;
         }
@@ -676,11 +689,3 @@ if ( class_exists( 'KISS_WSE_Debugger' ) ) {
     error_log( 'KISS_WSE_Debugger class not found during plugin initialization' );
 }
 
-// Register AJAX handlers using wp_loaded hook to ensure WordPress is fully loaded
-add_action( 'wp_loaded', function() {
-    error_log('KISS_WSE: wp_loaded hook called, registering AJAX handlers');
-    add_action( 'wp_ajax_kiss_wse_test_ajax', 'kiss_wse_test_ajax_callback' );
-    add_action( 'wp_ajax_kiss_wse_run_single_test', 'kiss_wse_run_single_test_callback' );
-    add_action( 'wp_ajax_kiss_wse_update_test_timestamp', 'kiss_wse_update_test_timestamp_callback' );
-    error_log('KISS_WSE: AJAX handlers registered in wp_loaded hook');
-} );
