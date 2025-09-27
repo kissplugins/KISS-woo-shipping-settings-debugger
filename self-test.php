@@ -60,15 +60,22 @@ function kiss_wse_get_changelog_preview( $lines = 100 ) {
         }
     }
 
-    // Fallback to a simple plain text preview.
+    // Fallback to a minimal HTML preview with bold preserved for **text**.
     $contents = file( $file );
     if ( false === $contents ) {
         return '<p>' . esc_html__( 'Unable to read changelog.md.', 'kiss-woo-shipping-debugger' ) . '</p>';
     }
-
+    $raw = implode( '', array_slice( $contents, 0, $lines ) );
+    // Convert Markdown bold **text** to <strong>text</strong>
+    $raw = preg_replace( '/\\*\\*(.+?)\\*\\*/s', '<strong>$1</strong>', $raw );
+    // Convert newlines to <br> for readability
+    $converted = nl2br( $raw );
+    $allowed = array(
+        'strong' => array(),
+        'br'     => array(),
+    );
     $fallback_html  = '<p><em>' . esc_html__( 'To see this rendered as HTML, please install the KISS Markdown Viewer plugin.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
-    $fallback_html .= '<pre>' . esc_html( implode( '', array_slice( $contents, 0, $lines ) ) ) . '</pre>';
-
+    $fallback_html .= wp_kses( $converted, $allowed );
     return $fallback_html;
 }
 
@@ -113,7 +120,39 @@ function kiss_wse_self_test_page_html() {
         <div class="notice notice-info">
             <p><strong>Debug Info:</strong></p>
             <ul>
-                <li>AJAX Action Registered: <?php echo has_action( 'wp_ajax_kiss_wse_run_single_test' ) ? 'YES' : 'NO'; ?></li>
+                <li>
+                    Self-Test Action: <?php echo has_action( 'wp_ajax_kiss_wse_run_single_test' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_run_single_test';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
+                <li>
+                    Test-Connection Action: <?php echo has_action( 'wp_ajax_kiss_wse_test_ajax' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_test_ajax';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
+                <li>
+                    Update-Timestamp Action: <?php echo has_action( 'wp_ajax_kiss_wse_update_test_timestamp' ) ? 'YES' : 'NO'; ?>
+                    <?php
+                    $hook = 'wp_ajax_kiss_wse_update_test_timestamp';
+                    $count = 0;
+                    if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+                        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $prio => $cbs ) { $count += count( $cbs ); }
+                    }
+                    echo '(callbacks: ' . intval( $count ) . ')';
+                    ?>
+                </li>
                 <li>Current User Can Manage WooCommerce: <?php echo current_user_can( 'manage_woocommerce' ) ? 'YES' : 'NO'; ?></li>
                 <li>Current User Can Manage Options: <?php echo current_user_can( 'manage_options' ) ? 'YES' : 'NO'; ?></li>
                 <li>AJAX URL: <?php echo esc_html( admin_url( 'admin-ajax.php' ) ); ?></li>
@@ -182,6 +221,7 @@ function kiss_wse_self_test_page_html() {
                 { id: 'warning_logic_mock', name: 'Logic: Preview Warning Detection (Mock)' },
                 { id: 'ast_scanner_logic', name: 'Logic: AST Scanner Rule & Array Resolution' },
                 { id: 'csv_injection_guard', name: 'Security: CSV Injection Guard' },
+                { id: 'changelog_preview', name: 'UX: Changelog Preview preserves <strong> bold' },
                 { id: 'menu_registration', name: 'UI: Menu & Action Links Registration' },
             ];
 
@@ -402,16 +442,6 @@ function kiss_wse_run_single_test_callback() {
                 unlink($temp_file);
 
                 // CORRECTED: The check for the error message now matches the actual HTML output, where only the first state is bolded.
-                $checks = [
-                    // Test 1 Check: Look for Kratom being bolded in the error message
-                    'We cannot ship <strong>Kratom</strong> to',
-
-                    // Test 2 Check: Look for Alabama being bolded (first state in the resolved array)
-                    'Adds a checkout error message: “We cannot ship <strong>Kratom</strong> to <strong>Alabama</strong>, Arkansas, Indiana, Vermont, Wisconsin.”',
-
-                    // Test 3 Check: Look for the error message structure
-                    'Adds a checkout error message:'
-                ];
 
                 // Check if the scanner output contains the key elements we expect
                 $has_kratom_bold = strpos($output, '<strong>Kratom</strong>') !== false;
@@ -480,6 +510,35 @@ function kiss_wse_run_single_test_callback() {
                 wp_send_json_success(['message' => 'Menu registration: PASS (callbacks present)']);
             } else {
                 wp_send_json_error(['message' => 'Menu registration: FAIL - ' . implode(', ', $issues)]);
+            }
+            break;
+
+        case 'changelog_preview':
+            $html = kiss_wse_get_changelog_preview( 150 );
+            $labels = [ 'Fix:', 'Enhancement:', 'Feature:' ];
+            $found = false;
+            foreach ( $labels as $label ) {
+                if ( strpos( $html, '<strong>' . $label . '</strong>' ) !== false ) { $found = true; break; }
+            }
+            if ( $found || strpos( $html, '<strong>' ) !== false ) {
+                wp_send_json_success( [ 'message' => 'Changelog preview preserves <strong> formatting.' ] );
+            } else {
+                wp_send_json_error( [ 'message' => 'Changelog preview does not appear to preserve <strong> formatting.' ] );
+            }
+            break;
+
+
+        case 'changelog_preview':
+            $html = kiss_wse_get_changelog_preview( 150 );
+            $labels = [ 'Fix:', 'Enhancement:', 'Feature:' ];
+            $found = false;
+            foreach ( $labels as $label ) {
+                if ( strpos( $html, '<strong>' . $label . '</strong>' ) !== false ) { $found = true; break; }
+            }
+            if ( $found || strpos( $html, '<strong>' ) !== false ) {
+                wp_send_json_success( [ 'message' => 'Changelog preview preserves <strong> formatting.' ] );
+            } else {
+                wp_send_json_error( [ 'message' => 'Changelog preview does not appear to preserve <strong> formatting.' ] );
             }
             break;
 

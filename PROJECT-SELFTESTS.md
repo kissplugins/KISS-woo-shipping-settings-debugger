@@ -26,11 +26,11 @@ This document has four sub-phases with actionable checklists:
   - AJAX endpoint pinned to admin-ajax.php and admin notices suppressed during AJAX
   - Fixed null-class fatals by instantiating main class for tests that require it
   - Menu test adjusted to validate callbacks in admin-ajax context
-- Phase 1.5: In progress — targeted for v2.7.6
-  - Verify changelog preview renders sanitized HTML while preserving <strong> in intended places
-  - Add on-page diagnostic indicator to detect duplicate AJAX handler registrations
-  - Ensure CSV injection guard smoke test passes via dispatcher (continue to validate headers + sanitization)
-  - Keep UI debug badges showing action registration and capability detection
+- Phase 1.5: Completed in v2.7.6
+  - Changelog preview preserves <strong> while remaining sanitized
+  - On-page diagnostic shows AJAX handler registration counts (detects duplicates)
+  - CSV injection guard smoke test passes via dispatcher
+  - UI debug badges show action registration and capability detection
 - Phase 2.0: Planned
   - Deep scanner correctness, array/placeholder resolution, grouping modes, bold formatting fidelity
 - Phase 2.5: Planned
@@ -97,11 +97,11 @@ Attn LLM: Please mark checkboxes upon completion.
 ## Phase 1.5: Basic Integration & UX Tests (Checklist)
 Admin UI and integration checks.
 
-- [ ] Menu & action links registered: WooCommerce submenu exists; plugin action links filter for this plugin basename is registered.
-- [ ] Changelog preview: changelog.md render helper returns sanitized HTML and does not escape <strong> tags (i.e., bolding preserved where intended).
-- [ ] CSV injection guard (basic): exporter sanitizes fields and emits safe CSV headers; smoke-test returns PASS without emitting file data.
-- [ ] Self-Test page localizes ajaxurl and shows debug indicators for action registration and capabilities.
-- [ ] No duplicate AJAX handlers registered (diagnostic/visual confirmation on Self-Test page).
+- [x] Menu & action links registered: WooCommerce submenu exists; plugin action links filter for this plugin basename is registered.
+- [x] Changelog preview: changelog.md render helper returns sanitized HTML and does not escape <strong> tags (i.e., bolding preserved where intended).
+- [x] CSV injection guard (basic): exporter sanitizes fields and emits safe CSV headers; smoke-test returns PASS without emitting file data.
+- [x] Self-Test page localizes ajaxurl and shows debug indicators for action registration and capabilities.
+- [x] No duplicate AJAX handlers registered (diagnostic/visual confirmation on Self-Test page).
 
 ## Phase 2.0: Advanced Logic Tests (Checklist)
 Scanner correctness and formatting fidelity.

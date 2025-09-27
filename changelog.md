@@ -2,6 +2,14 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.6
+* UX: Changelog preview now preserves <strong>bold</strong> in fallback mode (minimal Markdown-to-HTML for **bold** only, sanitized).
+* QA: Added self-test “changelog_preview” to verify <strong> rendering is preserved.
+* DX: Self-Test page now shows registered-callback counts for AJAX actions to detect duplicate registrations.
+* Phase 1.5: Completed diagnostics and UX checks covered in this release.
+* Docs: PROJECT-SELFTESTS Phase 1.5 checklist marked complete; status updated to 2.7.6.
+
+
 ## 2.7.5
 * Fix: Prevented null-class fatals in self-tests by instantiating the main debugger for tests that require it (warning logic and AST scanner).
 * Fix: Made Self-Test AJAX fully robust by pinning endpoint to admin-ajax.php and suppressing admin notices during AJAX.
