@@ -225,6 +225,7 @@ function kiss_wse_self_test_page_html() {
                 { id: 'ast_shipping_rules_geo_cost', name: 'Logic: AST detects rate removal and cost changes' },
                 { id: 'ast_payment_rules', name: 'Logic: AST detects payment gateway restrictions and checkout notices' },
                 { id: 'ast_mixed_geo_payment', name: 'Logic: AST detects both geo shipping and payment restrictions' },
+                // Deferred: { id: 'ast_array_placeholder', name: 'Logic: Array/placeholder resolution (conditions → human list)' },
                 // Deferred: bolding-detection tests are hidden from the UI until the Deferred Phase
                 // { id: 'ast_product_terms', name: 'Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)' },
                 // { id: 'ast_bold_fidelity', name: 'UX: Bold formatting fidelity for product and City/County/State names' },
@@ -571,6 +572,8 @@ PHP;
                     wp_send_json_error( [ 'message' => 'AST: expected product term bolding not found. Output: ' . esc_html( substr( $output, 0, 800 ) ) ] );
                 }
                 break;
+
+            // Deferred: 'ast_array_placeholder' test is hidden from UI and dispatcher.
 
             case 'ast_bold_fidelity':
                 $tmp = tempnam(sys_get_temp_dir(), 'kiss_wse_bold_');

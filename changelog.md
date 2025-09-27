@@ -3,6 +3,16 @@
 Plugin sponsored & developed by Neochrome, Inc.
 
 
+## 2.7.13
+## 2.7.14
+* Self-Test: Removed "Array/placeholder resolution (conditions → human list)" from the Self-Test UI and dispatcher; remains in Deferred list.
+
+
+* Docs: Moved "Array/placeholder resolution" self-test to Deferred list.
+* Docs: Added pause note to PROJECT-SELFTESTS.md as of 2025-09-27 indicating self-test development is paused.
+
+
+
 ## 2.7.8
 * Self-Test: Added "AST detects payment gateway restrictions and checkout notices".
 * Self-Test: Added "AST detects both geo shipping and payment restrictions".
@@ -20,6 +30,10 @@ Plugin sponsored & developed by Neochrome, Inc.
 * Self-Test: Added "Logic: Product/location term-driven rules (Kratom, Amanita, THC-A)" and "UX: Bold formatting fidelity for product and City/County/State names".
 * Docs: Phase 2.0 product/location and bolding fidelity items marked complete.
 
+
+## 2.7.12
+* Self-Test: Added "Array/placeholder resolution" check that validates placeholders like {restricted_states} are summarized into human-friendly lists when resolvable (e.g., "the location is one of: Alabama, Oregon").
+* Docs: PROJECT-SELFTESTS.md updated to mark Array/placeholder resolution as complete.
 
 ## 2.7.11
 * Fix: Prevent nested <strong> tags in formatted messages by de-duplicating overlapping bold rules.

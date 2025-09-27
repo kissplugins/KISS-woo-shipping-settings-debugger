@@ -26,6 +26,8 @@ This document has four sub-phases with actionable checklists:
   - AJAX endpoint pinned to admin-ajax.php and admin notices suppressed during AJAX
   - Fixed null-class fatals by instantiating main class for tests that require it
   - Menu test adjusted to validate callbacks in admin-ajax context
+- Pause note: As of 2025-09-27, additional self-test development is paused. Items marked as Deferred will be revisited in a future phase.
+
 - Phase 1.5: Completed in v2.7.6
   - Changelog preview preserves <strong> while remaining sanitized
   - On-page diagnostic shows AJAX handler registration counts (detects duplicates)
@@ -112,7 +114,7 @@ Scanner correctness and formatting fidelity.
 - [x] Mixed logic: detect geographical + payment restrictions in the same fixture (per test-focused-scanner.php) while ignoring non-signal hooks.
 - [x] Product- and location-term-driven logic: detect Kratom, Amanita Mushroom, THC-A rules; do not over-filter meaningful messages. (Note: bolding verification deferred to Deferred Phase)
 - [ ] Deferred: Bold formatting fidelity – retain <strong> for product and State/City/County names; sanitize other HTML safely (wp_kses allowlist for <strong>).
-- [ ] Array/placeholder resolution: replace placeholders like {restricted_states} with human-friendly lists when resolvable.
+- [ ] Deferred: Array/placeholder resolution – replace placeholders like {restricted_states} with human-friendly lists when resolvable.
 - [ ] Grouping modes: “Product” vs “Functional” grouping both render without error and align on counts.
 
 ## Phase 2.5: Advanced Performance & Security (Checklist)
@@ -129,8 +131,9 @@ The following tests are intentionally deferred to a dedicated phase so functiona
 
 - [ ] Bold formatting fidelity: verify preservation of <strong> for product names (Kratom, Amanita, THC-A/THCA) and State/City/County names across scanner outputs.
 - [ ] Product/location term-driven bolding: ensure product/location terms are bolded where appropriate, while avoiding over-bolding (e.g., prepositions like "of").
+- [ ] Array/placeholder resolution: verify resolved human lists in condition summaries (e.g., "the location is one of: Alabama, Oregon").
 
-Rationale: Bold formatting is a UX/presentation concern; while the behavior remains supported in code, strict tests are deferred to avoid false negatives during rapid scanner iteration. Comments in scanner-trait.php document the contract to preserve bolding.
+Rationale: Bold formatting and array/placeholder list rendering are presentation-facing; while the behavior remains supported in code, strict tests are deferred to avoid false negatives during rapid scanner iteration. Comments in scanner-trait.php document the contract to preserve bolding, and condition text generation documents list summarization.
 
 ## PHPDoc Guidelines for Self-Tests
 All self-test server-side code must include PHPDoc blocks:
