@@ -446,7 +446,7 @@ trait KISS_WSE_Scanner {
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
                     $this->allow_strong_tags( $desc ),
-                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
             echo '</ul>';
@@ -466,7 +466,7 @@ trait KISS_WSE_Scanner {
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
                     $this->allow_strong_tags( $desc ),
-                    sprintf( '<span style="opacity:.7;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
                 );
             }
             echo '</ul>';

@@ -3,14 +3,17 @@
 Plugin sponsored & developed by Neochrome, Inc.
 
 
-## 2.7.13
+## 2.7.16
+* UI: Report page – changed the “(line x - filename)” suffix color to #D54E21.
+
+
+## 2.7.15
+* UI: Report page – colored the “(line x - filename)” suffix text to #C0D3E9 (converted from RGB 192,211,233).
+
 ## 2.7.14
 * Self-Test: Removed "Array/placeholder resolution (conditions → human list)" from the Self-Test UI and dispatcher; remains in Deferred list.
-
-
 * Docs: Moved "Array/placeholder resolution" self-test to Deferred list.
 * Docs: Added pause note to PROJECT-SELFTESTS.md as of 2025-09-27 indicating self-test development is paused.
-
 
 
 ## 2.7.8
