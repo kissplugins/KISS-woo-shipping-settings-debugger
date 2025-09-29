@@ -176,7 +176,7 @@ trait KISS_WSE_Testable {
 
 class KISS_Woo_Shipping_Debugger_required_plugin {
 
-    private $required_plugin = 'WP-PHP-Parser-loader-main/php-parser-loader.php';
+    private $required_plugin = 'WP-PHP-Parser-loader/php-parser-loader.php';
     private $github_repo_zip = 'https://github.com/kissplugins/WP-PHP-Parser-loader/archive/refs/heads/main.zip';
     private $current_plugin;
 
@@ -279,6 +279,13 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
 
         if ( is_wp_error($result) ) {
             error_log('Plugin installation failed: ' . $result->get_error_message());
+        }
+
+        $downloaded_folder = WP_PLUGIN_DIR . '/WP-PHP-Parser-loader-main';
+        $final_folder      = WP_PLUGIN_DIR . '/WP-PHP-Parser-loader';
+
+        if ( is_dir($downloaded_folder) && ! is_dir($final_folder) ) {
+            rename($downloaded_folder, $final_folder);
         }
 
         // Try activating after install
