@@ -176,8 +176,9 @@ trait KISS_WSE_Testable {
 
 class KISS_Woo_Shipping_Debugger_required_plugin {
 
-    private $required_plugin = 'WP-PHP-Parser-loader/php-parser-loader.php';
     private $github_repo_zip = 'https://github.com/kissplugins/WP-PHP-Parser-loader/archive/refs/heads/main.zip';
+    private $required_slug = 'WP-PHP-Parser-loader';
+    private $required_file = 'php-parser-loader.php';
     private $current_plugin;
 
     public function __construct() {
@@ -189,6 +190,23 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
 
     public function is_plugin_installed( $plugin_file ) {
         return file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
+    }
+
+    public function find_plugin_path() {
+        // Search for folder variations like WP-PHP-Parser-loader*, case-insensitive
+        $plugin_dirs = glob( WP_PLUGIN_DIR . '/' . $this->required_slug . '*', GLOB_ONLYDIR );
+        if ( empty( $plugin_dirs ) ) {
+            return false;
+        }
+
+        foreach ( $plugin_dirs as $dir ) {
+            $plugin_file = trailingslashit( basename( $dir ) ) . $this->required_file;
+            if ( file_exists( WP_PLUGIN_DIR . '/' . $plugin_file ) ) {
+                return $plugin_file;
+            }
+        }
+
+        return false;
     }
     /**
      * Check if required plugin is installed/active
@@ -213,16 +231,17 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
         }
 
         // If already active, skip
-        if ( is_plugin_active($this->required_plugin) ) {
+        $plugin_path = $this->find_plugin_path();
+        if ( $plugin_path && is_plugin_active( $plugin_path ) ) {
             new KISS_WSE_Debugger();
             return;
         } 
 
         // If installed but not active → show Activate button
-        if ( file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) {
+        if ( ! empty($plugin_path) && file_exists(WP_PLUGIN_DIR . '/' . $plugin_path) ) {
             $activate_url = wp_nonce_url(
-                self_admin_url('plugins.php?action=activate&plugin=' . $this->required_plugin),
-                'activate-plugin_' . $this->required_plugin
+                self_admin_url('plugins.php?action=activate&plugin=' . $plugin_path),
+                'activate-plugin_' . $plugin_path
             );
 
             echo '<div class="notice notice-warning"><p>';
@@ -232,7 +251,7 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
             return;
         }
 
-        if ( !$this->is_plugin_installed( $this->required_plugin ) ) {
+        if ( empty($plugin_path) ) {
             // Not installed → show install button
             $install_url = wp_nonce_url(
                 admin_url('admin-post.php?action=kiss_install_parser_plugin'),
@@ -256,6 +275,7 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
         }
 
         include_once ABSPATH . 'wp-admin/includes/file.php';
+        include_once( ABSPATH . 'wp-admin/includes/misc.php' );
         include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
         include_once ABSPATH . 'wp-admin/includes/plugin.php';
 
@@ -281,19 +301,12 @@ class KISS_Woo_Shipping_Debugger_required_plugin {
             error_log('Plugin installation failed: ' . $result->get_error_message());
         }
 
-        $downloaded_folder = WP_PLUGIN_DIR . '/WP-PHP-Parser-loader-main';
-        $final_folder      = WP_PLUGIN_DIR . '/WP-PHP-Parser-loader';
-
-        if ( is_dir($downloaded_folder) && ! is_dir($final_folder) ) {
-            rename($downloaded_folder, $final_folder);
+        $plugin_path = $this->find_plugin_path();
+        if ( $plugin_path && file_exists( WP_PLUGIN_DIR . '/' . $plugin_path ) ) {
+            activate_plugin( $plugin_path );
         }
 
-        // Try activating after install
-        if ( file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) {
-            activate_plugin($this->required_plugin);
-        }
-
-        if (is_plugin_active($this->current_plugin) && ( !file_exists(WP_PLUGIN_DIR . '/' . $this->required_plugin) ) ) {
+        if (is_plugin_active($this->current_plugin) && ( !file_exists(WP_PLUGIN_DIR . '/' . $plugin_path) ) ) {
             deactivate_plugins($this->current_plugin);
 
             // Clear cache and re-check
