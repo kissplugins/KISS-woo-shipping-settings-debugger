@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.7.17
+ * Version:     2.7.18
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -34,6 +34,34 @@ if ( ! function_exists( 'kiss_wse_csv_sanitize_cell' ) ) {
             }
         }
         return $s;
+    }
+}
+
+// Shared helper: build an ordered list of WooCommerce shipping zone IDs (includes 0 for Rest of the World).
+if ( ! function_exists( 'kiss_wse_get_shipping_zone_ids' ) ) {
+    function kiss_wse_get_shipping_zone_ids(): array {
+        $zone_rows = \WC_Shipping_Zones::get_zones();
+        $zone_ids  = [];
+        foreach ( $zone_rows as $zr ) {
+            if ( isset( $zr['zone_id'] ) ) {
+                $zone_ids[] = (int) $zr['zone_id'];
+            }
+        }
+        $zone_ids[] = 0; // Rest of the world
+        return $zone_ids;
+    }
+}
+
+// Shared helper: convert a numeric amount to a clean text price (no HTML), preferring wc_price formatting.
+if ( ! function_exists( 'kiss_wse_price_to_text' ) ) {
+    function kiss_wse_price_to_text( float $amount ): string {
+        if ( function_exists( 'wc_price' ) ) {
+            return trim( wp_strip_all_tags( wc_price( $amount ) ) );
+        }
+        if ( floor( $amount ) == $amount ) {
+            return '$' . number_format( (int) $amount, 0 );
+        }
+        return '$' . number_format( $amount, 2 );
     }
 }
 
@@ -120,6 +148,7 @@ trait KISS_WSE_Testable {
 
         ob_start();
 
+        require_once plugin_dir_path( __FILE__ ) . 'lib/ScopeKeyHelper.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
 
@@ -364,6 +393,13 @@ class KISS_WSE_Debugger {
     }
 
     /**
+     * Verify nonce for admin form submissions.
+     */
+    private function verify_admin_nonce(): bool {
+        return (bool) check_admin_referer( $this->page_slug, 'wse_nonce' );
+    }
+
+    /**
      * Constructor. Hooks into WordPress admin and ensures PHP-Parser is loaded.
      */
     private ?\PhpParser\Parser $parser;
@@ -585,14 +621,14 @@ class KISS_WSE_Debugger {
         }
 
         // Handle trace toggle/clear
-        if ( isset($_POST['kiss_wse_toggle_trace']) && check_admin_referer($this->page_slug, 'wse_nonce') ) {
+        if ( isset($_POST['kiss_wse_toggle_trace']) && $this->verify_admin_nonce() ) {
             $current = get_option('kiss_wse_enable_live_trace');
             update_option('kiss_wse_enable_live_trace', !$current);
             if (!$current) {
                 delete_transient('kiss_wse_live_trace');
             }
         }
-        if ( isset($_POST['kiss_wse_clear_trace']) && check_admin_referer($this->page_slug, 'wse_nonce') ) {
+        if ( isset($_POST['kiss_wse_clear_trace']) && $this->verify_admin_nonce() ) {
             delete_transient('kiss_wse_live_trace');
         }
 
@@ -715,7 +751,7 @@ class KISS_WSE_Debugger {
         }
 
         // Nonce verification
-        check_admin_referer( $this->page_slug, 'wse_nonce' );
+        $this->verify_admin_nonce();
 
 
         // Rate limiting: throttle export requests per user/IP
@@ -782,13 +818,7 @@ class KISS_WSE_Debugger {
         // Header row
         fputcsv( $out, array_map( 'kiss_wse_csv_sanitize_cell', [ 'Zone', 'Enabled', 'Disabled', 'Locations', 'Methods' ] ) );
 
-        // Build a list of zone IDs (add 0 for Rest of the world)
-        $zone_rows = \WC_Shipping_Zones::get_zones();
-        $zone_ids  = [];
-        foreach ( $zone_rows as $zr ) {
-            if ( isset( $zr['zone_id'] ) ) { $zone_ids[] = (int) $zr['zone_id']; }
-        }
-        $zone_ids[] = 0; // Rest of the world
+        $zone_ids = kiss_wse_get_shipping_zone_ids();
 
         foreach ( $zone_ids as $zone_id ) {
             $zone = new \WC_Shipping_Zone( (int) $zone_id );

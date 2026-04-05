@@ -84,15 +84,7 @@ trait KISS_WSE_Preview {
         $rows = [];
         $warnings = [];
 
-        // Build a list of zone IDs (add 0 for Rest of the world)
-        $zone_rows = \WC_Shipping_Zones::get_zones(); // array of arrays with 'zone_id'
-        $zone_ids  = [];
-        foreach ( $zone_rows as $zr ) {
-            if ( isset( $zr['zone_id'] ) ) {
-                $zone_ids[] = (int) $zr['zone_id'];
-            }
-        }
-        $zone_ids[] = 0; // Rest of the world
+        $zone_ids = kiss_wse_get_shipping_zone_ids();
 
         $total_rows = 0;
 
@@ -364,18 +356,11 @@ trait KISS_WSE_Preview {
     }
 
     /**
-     * Convert a numeric amount to a clean text price (no HTML), preferring wc_price formatting.
+     * Convert a numeric amount to a clean text price (no HTML).
+     * Delegates to the shared kiss_wse_price_to_text() function.
      */
     public function price_to_text( float $amount ): string {
-        if ( function_exists( 'wc_price' ) ) {
-            // wc_price returns HTML; strip tags to plain text for table cells
-            return trim( wp_strip_all_tags( wc_price( $amount ) ) );
-        }
-        // Fallback basic formatting
-        if ( floor( $amount ) == $amount ) {
-            return '$' . number_format( (int) $amount, 0 );
-        }
-        return '$' . number_format( $amount, 2 );
+        return kiss_wse_price_to_text( $amount );
     }
 
     private function zone_edit_link( int $zone_id ): string {

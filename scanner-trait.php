@@ -5,6 +5,18 @@
 trait KISS_WSE_Scanner {
 
     /**
+     * Format a line number + filename reference for scanner output.
+     */
+    private function format_line_ref( int $line, string $filename ): string {
+        return sprintf(
+            '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>',
+            esc_html__( 'line', 'kiss-woo-shipping-debugger' ),
+            esc_html( $line ),
+            esc_html( $filename )
+        );
+    }
+
+    /**
      * Safely allow strong tags in HTML output
      */
     private function allow_strong_tags( $content ) {
@@ -16,6 +28,7 @@ trait KISS_WSE_Scanner {
     }
 
     private function scan_and_render_custom_rules( ?string $additional ): void {
+        require_once plugin_dir_path( __FILE__ ) . 'lib/ScopeKeyHelper.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
         require_once plugin_dir_path( __FILE__ ) . 'lib/ArrayCollectorVisitor.php';
 
@@ -382,7 +395,7 @@ trait KISS_WSE_Scanner {
             $product_groups[ $found_keyword ][] = $finding;
 
             // Group by containing function/method
-            $scope = $this->getCurrentScopeKey( $finding['node'] );
+            $scope = \KISSShippingDebugger\ScopeKeyHelper::get( $finding['node'] );
             if ( $scope === '__global__' ) {
                 $scope = __( 'Global Scope', 'kiss-woo-shipping-debugger' );
             } elseif ( 0 === strpos( $scope, 'closure@line:' ) ) {
@@ -446,7 +459,7 @@ trait KISS_WSE_Scanner {
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
                     $this->allow_strong_tags( $desc ),
-                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    $this->format_line_ref( $line, $filename )
                 );
             }
             echo '</ul>';
@@ -466,7 +479,7 @@ trait KISS_WSE_Scanner {
                     '<li><strong>%s</strong> — %s %s</li>',
                     esc_html( $this->short_explanation_label( $finding['key'] ) ),
                     $this->allow_strong_tags( $desc ),
-                    sprintf( '<span style="opacity:.7;color:#D54E21;">(%s %d - %s)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ), esc_html( $filename ) )
+                    $this->format_line_ref( $line, $filename )
                 );
             }
             echo '</ul>';
@@ -894,7 +907,7 @@ trait KISS_WSE_Scanner {
                 // This is where we try to resolve the array.
                 if ( $expr->var instanceof \PhpParser\Node\Expr\Variable && is_string( $expr->var->name ) ) {
                     $var_name  = $expr->var->name;
-                    $scope_key = $this->getCurrentScopeKey( $expr );
+                    $scope_key = \KISSShippingDebugger\ScopeKeyHelper::get( $expr );
                     $file_arrays = $collected_arrays[$current_file] ?? [];
 
                     if ( isset( $file_arrays[$scope_key][$var_name] ) ) {
@@ -1108,7 +1121,7 @@ trait KISS_WSE_Scanner {
 
             if( $is_array_check && $array_var_node instanceof \PhpParser\Node\Expr\Variable && is_string( $array_var_node->name ) ) {
                 $var_name  = $array_var_node->name;
-                $scope_key = $this->getCurrentScopeKey( $expr );
+                $scope_key = \KISSShippingDebugger\ScopeKeyHelper::get( $expr );
                 $file_arrays = $collected_arrays[$current_file] ?? [];
 
                 if ( isset( $file_arrays[$scope_key][$var_name] ) ) {
@@ -1161,7 +1174,7 @@ trait KISS_WSE_Scanner {
             foreach ( $opMap as $cls => $op ) {
                 if ( $expr instanceof $cls ) {
                     if ( $this->is_var_named( $expr->left, 'adjusted_total' ) && $this->is_number_like( $expr->right ) ) {
-                        $num = $this->price_to_text( (float) $expr->right->value );
+                        $num = kiss_wse_price_to_text( (float) $expr->right->value );
                         switch ( $op ) {
                             case '<':  return sprintf( __( 'the non-drink subtotal is under %s', 'kiss-woo-shipping-debugger' ), esc_html( $num ) );
                             case '<=': return sprintf( __( 'the non-drink subtotal is at most %s', 'kiss-woo-shipping-debugger' ), esc_html( $num ) );
@@ -1276,35 +1289,7 @@ trait KISS_WSE_Scanner {
         return false;
     }
 
-    /**
-     * Traverses parent nodes to determine the current function/method/closure scope.
-     * Copied from ArrayCollectorVisitor to be available in the description context.
-     */
-    private function getCurrentScopeKey(\PhpParser\Node $node): string {
-        $parent = $node->getAttribute('parent');
-        while ($parent) {
-            if ($parent instanceof \PhpParser\Node\FunctionLike) {
-                if ($parent instanceof \PhpParser\Node\Stmt\ClassMethod) {
-                    $className = '__anonymous';
-                    $classParent = $parent->getAttribute('parent');
-                    if ($classParent instanceof \PhpParser\Node\Stmt\Class_ && $classParent->name instanceof \PhpParser\Node\Identifier) {
-                        $className = $classParent->name->toString();
-                    }
-                    return $className . '::' . $parent->name->toString();
-                }
-
-                if ($parent instanceof \PhpParser\Node\Stmt\Function_) {
-                    return $parent->name->toString();
-                }
-
-                if ($parent instanceof \PhpParser\Node\Expr\Closure) {
-                    return 'closure@line:' . $parent->getStartLine();
-                }
-            }
-            $parent = $parent->getAttribute('parent');
-        }
-        return '__global__';
-    }
+    // getCurrentScopeKey() extracted to \KISSShippingDebugger\ScopeKeyHelper::get()
 
     /**
      * Formats an array of strings into a human-readable list.

@@ -31,7 +31,7 @@ class ArrayCollectorVisitor extends NodeVisitorAbstract {
             $varName = $node->var instanceof Expr\Variable ? $node->var->name : null;
 
             if ($varName && is_string($varName)) {
-                $scopeKey = $this->getCurrentScopeKey($node);
+                $scopeKey = ScopeKeyHelper::get($node);
                 $this->arrays_by_scope[$scopeKey][$varName] = $this->resolveArray($node->expr);
             }
         }
@@ -79,38 +79,7 @@ class ArrayCollectorVisitor extends NodeVisitorAbstract {
         return $out;
     }
 
-    /**
-     * Traverses parent nodes to determine the current function/method/closure scope.
-     *
-     * @param Node $node
-     * @return string The scope key (e.g., 'MyClass::myMethod', 'my_function', 'closure@line:123', '__global__').
-     */
-    private function getCurrentScopeKey(Node $node): string {
-        $parent = $node->getAttribute('parent');
-        while ($parent) {
-            if ($parent instanceof FunctionLike) {
-                if ($parent instanceof ClassMethod) {
-                    $className = '__anonymous';
-                    $classParent = $parent->getAttribute('parent');
-                    if ($classParent instanceof Class_ && $classParent->name instanceof Node\Identifier) {
-                        $className = $classParent->name->toString();
-                    }
-                    return $className . '::' . $parent->name->toString();
-                }
-
-                if ($parent instanceof Function_) {
-                    return $parent->name->toString();
-                }
-
-                if ($parent instanceof Closure) {
-                    return 'closure@line:' . $parent->getStartLine();
-                }
-            }
-            $parent = $parent->getAttribute('parent');
-        }
-
-        return '__global__';
-    }
+    // getCurrentScopeKey() extracted to ScopeKeyHelper::get()
 
     /**
      * Public getter for the collected arrays.

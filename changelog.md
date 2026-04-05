@@ -2,6 +2,13 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.18
+* DRY: Extracted duplicated `getCurrentScopeKey()` into shared `lib/ScopeKeyHelper.php`, replacing identical copies in `ArrayCollectorVisitor` and `scanner-trait`.
+* DRY: Extracted zone-ID-building loop into shared `kiss_wse_get_shipping_zone_ids()` function, replacing duplicates in `preview-trait` and `output_csv()`.
+* DRY: Extracted duplicated line-reference `sprintf` into `format_line_ref()` method in `scanner-trait`.
+* DRY: Extracted repeated `check_admin_referer()` calls into `verify_admin_nonce()` method in `KISS_WSE_Debugger`.
+* DRY: Moved `price_to_text()` logic to shared `kiss_wse_price_to_text()` function, eliminating cross-trait dependency.
+
 ## 2.7.17
 * Feature: Added an integrated "Live Rate Trace" UI to capture and view the actual shipping rates array during the checkout process.
 * Refactor: Moved the debug tracing logic from the standalone `ship-trace-mu-plugin.php` into the main plugin and gated it via an admin toggle.

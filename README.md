@@ -3,7 +3,7 @@ Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple  
 Requires at least: 6.0   
 Tested up to: 6.8  
-Stable tag: 2.7.17  
+Stable tag: 2.7.18  
 Requires PHP: 7.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -219,6 +219,7 @@ To keep the admin fast and responsive on stores with many zones/methods. The CSV
 
 See `changelog.md` for detailed version history. Highlights:
 
+- **2.7.18** – DRY refactor: extracted 5 duplicated patterns into shared helpers (`ScopeKeyHelper`, `kiss_wse_get_shipping_zone_ids()`, `format_line_ref()`, `verify_admin_nonce()`, `kiss_wse_price_to_text()`).
 - **2.7.17** – Live Rate Trace: capture and view the `woocommerce_package_rates` array at each filter priority during checkout.
 - **2.6.0** – Payment gateway and method restriction detection added to the AST scanner.
 - **2.5.1** – Security hardening: CSV injection guard, rate limiting, path traversal fix, ReDoS protection.
