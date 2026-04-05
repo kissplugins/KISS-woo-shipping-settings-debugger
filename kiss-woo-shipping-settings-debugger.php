@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KISS Woo Shipping & Payment Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping and payment rules via AST.
- * Version:     2.7.16
+ * Version:     2.7.17
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -388,6 +388,69 @@ class KISS_WSE_Debugger {
 
         // Register AJAX handlers for self-test functionality using init hook
         add_action( 'init', [ $this, 'register_ajax_handlers' ] );
+
+        // Register live rate trace hooks on the frontend
+        $this->register_trace_hooks();
+    }
+
+    /**
+     * Hook into woocommerce_package_rates at multiple priorities to capture
+     * before / middle / after snapshots when tracing is enabled.
+     */
+    private function register_trace_hooks(): void {
+        if ( is_admin() && ! wp_doing_ajax() ) {
+            return; // Only needed on frontend / AJAX checkout requests
+        }
+
+        $capture = function ( string $note, bool $include_cart_total = false ) {
+            return function ( $rates, $package ) use ( $note, $include_cart_total ) {
+                if ( ! get_option( 'kiss_wse_enable_live_trace' ) ) {
+                    return $rates;
+                }
+
+                $snapshot = [];
+                foreach ( $rates as $id => $rate ) {
+                    $snapshot[ $id ] = $rate->get_label() . ' — $' . number_format( (float) $rate->get_cost(), 2 );
+                }
+
+                $entry = [
+                    'priority' => current_filter() ? current_filter() : 'woocommerce_package_rates',
+                    'time'     => current_time( 'H:i:s' ),
+                    'note'     => $note,
+                    'rates'    => $snapshot,
+                ];
+
+                if ( $include_cart_total && ! empty( $package['contents'] ) ) {
+                    $cart_total = 0;
+                    foreach ( $package['contents'] as $item ) {
+                        $cart_total += (float) $item['line_total'];
+                    }
+                    $entry['note'] .= ' | Package total: $' . number_format( $cart_total, 2 );
+                }
+
+                // Each checkout calculation resets the trace, then appends snapshots
+                $trace = get_transient( 'kiss_wse_live_trace' ) ?: [];
+
+                // Reset on the first (earliest) capture of a new calculation
+                if ( empty( $trace ) || ( isset( $trace[0]['request_id'] ) && $trace[0]['request_id'] !== wp_get_session_token() . '-' . time() ) ) {
+                    // Keep it simple: just append; admin "Clear" button handles reset
+                }
+
+                $trace[] = $entry;
+                set_transient( 'kiss_wse_live_trace', $trace, HOUR_IN_SECONDS );
+
+                return $rates;
+            };
+        };
+
+        // Priority 8: before most plugin filters (role-based runs at 9)
+        add_filter( 'woocommerce_package_rates', $capture( 'BEFORE all plugin filters', true ), 8, 2 );
+
+        // Priority 10: after role-based (pri 9), alongside CSP/theme (pri 10)
+        add_filter( 'woocommerce_package_rates', $capture( 'After role-based (pri 9), with CSP/theme (pri 10)' ), 10, 2 );
+
+        // Priority 11: after all standard-priority filters
+        add_filter( 'woocommerce_package_rates', $capture( 'AFTER all standard filters' ), 11, 2 );
     }
 
     /**
@@ -521,6 +584,18 @@ class KISS_WSE_Debugger {
             );
         }
 
+        // Handle trace toggle/clear
+        if ( isset($_POST['kiss_wse_toggle_trace']) && check_admin_referer($this->page_slug, 'wse_nonce') ) {
+            $current = get_option('kiss_wse_enable_live_trace');
+            update_option('kiss_wse_enable_live_trace', !$current);
+            if (!$current) {
+                delete_transient('kiss_wse_live_trace');
+            }
+        }
+        if ( isset($_POST['kiss_wse_clear_trace']) && check_admin_referer($this->page_slug, 'wse_nonce') ) {
+            delete_transient('kiss_wse_live_trace');
+        }
+
         // --- Custom Rules Scanner UI ---
         echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
         echo '<p>' . esc_html__( 'Scans your theme files for shipping and payment-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
@@ -548,6 +623,64 @@ class KISS_WSE_Debugger {
         } catch ( \Throwable $e ) {
             echo '<div class="notice notice-error"><pre>' . esc_html( $e->getMessage() ) . '</pre></div>';
             error_log( '[KISS Scanner] ' . $e->getMessage() );
+        }
+
+        // --- Live Rate Trace UI ---
+        echo '<hr/><h2>' . esc_html__( 'Live Rate Trace', 'kiss-woo-shipping-debugger' ) . '</h2>';
+        echo '<p>' . esc_html__( 'Captures the actual shipping rates array at different stages of the checkout process to find out what code strips rates and when.', 'kiss-woo-shipping-debugger' ) . '</p>';
+        
+        $is_tracing = get_option('kiss_wse_enable_live_trace');
+        $trace_data = get_transient('kiss_wse_live_trace');
+        
+        echo '<form method="post" style="margin-bottom:1em;">';
+        wp_nonce_field($this->page_slug, 'wse_nonce');
+        
+        if ( $is_tracing ) {
+            echo '<button type="submit" name="kiss_wse_toggle_trace" value="1" class="button button-secondary" style="color:#b32d2e; border-color:#b32d2e;">' . esc_html__('Stop Tracing', 'kiss-woo-shipping-debugger') . '</button>';
+            echo ' <span style="display:inline-block;padding:4px 8px;border-radius:3px;background:#e7f7ed;color:#0a732e;font-weight:bold;margin-left:10px;">' . esc_html__('Tracing Active: Add items to cart and visit checkout to capture rates.', 'kiss-woo-shipping-debugger') . '</span>';
+        } else {
+            echo '<button type="submit" name="kiss_wse_toggle_trace" value="1" class="button button-primary">' . esc_html__('Enable Live Rate Trace', 'kiss-woo-shipping-debugger') . '</button>';
+        }
+        
+        if ( !empty($trace_data) ) {
+            echo ' <button type="submit" name="kiss_wse_clear_trace" value="1" class="button">' . esc_html__('Clear Trace Log', 'kiss-woo-shipping-debugger') . '</button>';
+        }
+        echo '</form>';
+        
+        if ( !empty($trace_data) && is_array($trace_data) ) {
+            echo '<div style="background:#fff; border:1px solid #c3c4c7; padding:15px; margin-top:10px;">';
+            echo '<h3>' . esc_html__('Latest Captured Calculation Chain', 'kiss-woo-shipping-debugger') . '</h3>';
+            echo '<table class="wp-list-table widefat striped">';
+            echo '<thead><tr><th>' . esc_html__('Priority & Timing', 'kiss-woo-shipping-debugger') . '</th><th>' . esc_html__('Notes', 'kiss-woo-shipping-debugger') . '</th><th>' . esc_html__('Rates Found', 'kiss-woo-shipping-debugger') . '</th></tr></thead><tbody>';
+            
+            foreach ( $trace_data as $entry ) {
+                $priority = $entry['priority'] ?? '';
+                $time = $entry['time'] ?? '';
+                $note = $entry['note'] ?? '';
+                $rates = $entry['rates'] ?? [];
+                
+                echo '<tr>';
+                echo '<td style="width:20%;"><strong>Priority ' . esc_html($priority) . '</strong><br><span style="color:#666; font-size:12px;">' . esc_html($time) . '</span></td>';
+                echo '<td style="width:30%;">' . esc_html($note) . '</td>';
+                
+                echo '<td>';
+                if ( empty($rates) ) {
+                    echo '<em>' . esc_html__('No rates returned', 'kiss-woo-shipping-debugger') . '</em>';
+                } else {
+                    echo '<ul style="margin:0;">';
+                    foreach ( $rates as $id => $label ) {
+                        echo '<li><strong>' . esc_html($id) . '</strong>: ' . esc_html($label) . '</li>';
+                    }
+                    echo '</ul>';
+                }
+                echo '</td>';
+                echo '</tr>';
+            }
+            
+            echo '</tbody></table>';
+            echo '</div>';
+        } elseif ( $is_tracing ) {
+            echo '<p><em>' . esc_html__('Waiting for checkout execution... (Trace log is currently empty)', 'kiss-woo-shipping-debugger') . '</em></p>';
         }
 
         // --- UI Settings Export UI + Zones & Methods Preview ---

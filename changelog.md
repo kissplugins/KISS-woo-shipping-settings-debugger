@@ -2,6 +2,10 @@
 
 Plugin sponsored & developed by Neochrome, Inc.
 
+## 2.7.17
+* Feature: Added an integrated "Live Rate Trace" UI to capture and view the actual shipping rates array during the checkout process.
+* Refactor: Moved the debug tracing logic from the standalone `ship-trace-mu-plugin.php` into the main plugin and gated it via an admin toggle.
+* UX: Trace logs are now neatly rendered in a table within the admin page rather than output to `debug.log`.
 
 ## 2.7.16
 * UI: Report page – changed the “(line x - filename)” suffix color to #D54E21.
