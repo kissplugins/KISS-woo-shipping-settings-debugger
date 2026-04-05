@@ -3,12 +3,12 @@ Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple  
 Requires at least: 6.0   
 Tested up to: 6.8  
-Stable tag: 2.5.1  
+Stable tag: 2.7.17  
 Requires PHP: 7.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
-A simple, robust tool for store managers and developers to **audit, preview, and export** WooCommerce shipping settings—and to **scan custom theme code** for geographical restrictions and payment method filtering via PHP-Parser (AST).
+A simple, robust tool for store managers and developers to **audit, preview, and export** WooCommerce shipping settings—**scan custom theme code** for geographical restrictions and payment method filtering via PHP-Parser (AST)—and **trace live shipping rate calculations** at checkout to pinpoint exactly where rates are added, modified, or removed.
 
 ---
 
@@ -16,6 +16,7 @@ A simple, robust tool for store managers and developers to **audit, preview, and
 
 WooCommerce shipping settings can be complex. **KISS Woo Shipping Settings Debugger** provides:
 
+- A **Live Rate Trace** that captures the actual `woocommerce_package_rates` array at multiple filter priorities during checkout, showing exactly which rates exist before and after each plugin's modifications.
 - A **one-click CSV export** of zones, methods, costs, and shipping classes.
 - A **live “Shipping Zones & Methods Preview”** table with quick links to edit each zone/method, owner-friendly warnings (e.g., zones with no enabled methods), and quick filters.
 - A **Custom Rules Scanner** that parses your theme files **using PHP-Parser (AST)** to surface code that alters shipping (e.g., `unset($rates[...])`, `new WC_Shipping_Rate(...)`, `add_fee()`, checkout validations via `$errors->add`, etc.) with **human-readable explanations**.
@@ -27,6 +28,14 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
 ---
 
 ## == Key Features ==
+
+- **Live Rate Trace**
+  - Toggle tracing on from the admin page, then visit checkout to capture rate snapshots.
+  - Hooks into `woocommerce_package_rates` at **priority 8** (before plugins), **priority 10** (mid-chain), and **priority 11** (after all standard filters).
+  - Each snapshot records: rate IDs, labels, costs, package cart total, and timestamp.
+  - Results display in a table on the admin page showing the full calculation chain.
+  - Helps answer: *"Which plugin or filter is removing my shipping rates?"*
+  - Data stored in a short-lived transient (1 hour); clear anytime via the admin UI.
 
 - **Shipping Zones & Methods Preview**
   - Zone locations summarized (e.g., `US:CA, US:NY, … +N more`).
@@ -64,7 +73,7 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
 1. **Comprehensive Shipping Audits:** See all rates and requirements in one place.  
 2. **Configuration Backup & Archiving:** Create timestamped snapshots of your setup.  
 3. **Migrating / Staging:** Use the CSV + preview as a definitive checklist for replication.  
-4. **Troubleshooting:** Quickly verify if Free Shipping should appear for a given subtotal.  
+4. **Troubleshooting:** Quickly verify if Free Shipping should appear for a given subtotal, or use Live Rate Trace to see exactly where rates disappear.  
 5. **Onboarding / Training:** Explain the store’s shipping logic to new teammates or clients.  
 6. **Code Visibility:** Understand custom geographical restrictions and payment method filtering without reading the entire codebase.
 
@@ -95,7 +104,13 @@ The CSV export is streamed to the browser—no big memory spikes and no temporar
 - Owner-friendly warnings help surface common misconfigurations (e.g., “no enabled methods”).
 - Preview is capped to **100 rows** for performance.
 
-### 3) Custom Rules Scanner (AST)
+### 3) Live Rate Trace
+- When tracing is enabled via the admin toggle, the plugin hooks into `woocommerce_package_rates` at three priorities (8, 10, 11).
+- Each hook captures a snapshot of all available rates (ID, label, cost) and the package cart total.
+- Snapshots are stored in a WordPress transient (`kiss_wse_live_trace`), viewable as a table on the admin page.
+- This replaces the old `debug-shipping-rates.php` mu-plugin approach — no separate file, no `debug.log` parsing, and toggle-able from the UI.
+
+### 4) Custom Rules Scanner (AST)
 - Leverages **PHP-Parser** to parse PHP files into an abstract syntax tree and walk it with a custom visitor (`lib/RateAddCallVisitor.php`).
 - By default scans the child theme file:
   - `/wp-content/themes/{active-child}/inc/shipping-restrictions.php`
@@ -177,9 +192,10 @@ If you prefer your own loader, that’s fine—so long as `\PhpParser\ParserFact
 ## == How To Use (Store Owners) ==
 
 1. Go to **Tools → KISS Shipping Debugger**.
-2. Review the **“Shipping Zones & Methods Preview”**. Use filters to focus on issues or enabled methods only.
-3. In **“Custom Rules Scanner”**, optionally type a file path **relative to your child theme’s `/inc/`** (e.g., `extra.php`) and click **Scan**.
-4. To archive settings, click **Download CSV of UI Settings** to get a timestamped export.
+2. Review the **”Shipping Zones & Methods Preview”**. Use filters to focus on issues or enabled methods only.
+3. To debug missing rates, click **Enable Live Rate Trace**, then open checkout in another tab. Return to the admin page to see the captured calculation chain.
+4. In **”Custom Rules Scanner”**, optionally type a file path **relative to your child theme’s `/inc/`** (e.g., `extra.php`) and click **Scan**.
+5. To archive settings, click **Download CSV of UI Settings** to get a timestamped export.
 
 ---
 
@@ -203,9 +219,10 @@ To keep the admin fast and responsive on stores with many zones/methods. The CSV
 
 See `changelog.md` for detailed version history. Highlights:
 
-- **1.0.8** – Remembers the additional theme file to scan for custom rules.
-- **1.0.7** – Fixed zone warning; cleaner price text; refined method details.
+- **2.7.17** – Live Rate Trace: capture and view the `woocommerce_package_rates` array at each filter priority during checkout.
+- **2.6.0** – Payment gateway and method restriction detection added to the AST scanner.
+- **2.5.1** – Security hardening: CSV injection guard, rate limiting, path traversal fix, ReDoS protection.
+- **2.3.0** – Integrated self-test suite with regression testing.
 - **1.0.6** – Restored Zones & Methods Preview with filters, warnings, and deep links.
-- **1.0.5+** – Improved human-readable AST summaries; security hardening; realpath clamping; parser self-test.
 
 ---
